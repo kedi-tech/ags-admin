@@ -344,8 +344,10 @@ const Orders: React.FC = () => {
   const todayRevenue = orders.filter(o => o.date === '15 Oct 2024').reduce((s, o) => s + o.amount, 0);
   const inDelivery = orders.filter(o => o.status === 'livré').length;
 
-  const currentOrder = selectedOrder ? orders.find(o => o.id === selectedOrder.id) ?? selectedOrder;
-  if (selectedOrder) {
+  const currentOrder: Order | null = selectedOrder
+    ? (orders.find(o => o.id === selectedOrder.id) ?? selectedOrder)
+    : null;
+  if (currentOrder) {
     return (
       <OrderDetail
         order={currentOrder}
