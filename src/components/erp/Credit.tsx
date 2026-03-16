@@ -1,24 +1,59 @@
-import React, { useState } from 'react';
-import { creditAccounts as initialAccounts, creditTransactions, type CreditAccount } from '@/data/erp-data';
+import React, { useEffect, useState } from 'react';
+import type {
+  ApiCredit as Credit,
+  ApiOrder as Order,
+  ApiClient as Client,
+  CreditStatus,
+  ClientType,
+} from '@/api/credits';
+import {
+  fetchCredits,
+  createCredit,
+  updateCreditStatus,
+  deleteCredit,
+} from '@/api/credits';
+import { fetchOrders } from '@/api/orders';
 
-const CreditStatusBadge: React.FC<{ status: string }> = ({ status }) => {
-  const map: Record<string, { label: string; cls: string }> = {
-    actif: { label: 'Actif', cls: 'bg-emerald-500/15 text-emerald-400' },
-    avertissement: { label: 'Avertissement', cls: 'bg-amber-500/15 text-amber-400' },
-    bloqué: { label: 'Bloqué', cls: 'bg-rose-500/15 text-rose-400' },
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmt = (n: number) => `GNF ${n.toLocaleString('fr-FR')}`;
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+
+const daysUntil = (iso: string) =>
+  Math.ceil((new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+
+// ─── Badges ───────────────────────────────────────────────────────────────────
+
+const CreditStatusBadge: React.FC<{ status: CreditStatus }> = ({ status }) => {
+  const map: Record<CreditStatus, { label: string; cls: string }> = {
+    ACTIVE:   { label: 'Actif',   cls: 'bg-emerald-500/15 text-emerald-400' },
+    PAID:     { label: 'Payé',    cls: 'bg-blue-500/15 text-blue-400'       },
+    EXPIRED:  { label: 'Expiré', cls: 'bg-amber-500/15 text-amber-400'     },
+    CANCELED: { label: 'Annulé', cls: 'bg-rose-500/15 text-rose-400'       },
   };
-  const s = map[status] || { label: status, cls: 'bg-slate-500/15 text-slate-400' };
+  const s = map[status];
   return <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${s.cls}`}>{s.label}</span>;
 };
 
-const SettleModal: React.FC<{ account: CreditAccount; onClose: () => void; onConfirm: (accountId: string, amountPaid: number) => void }> = ({ account, onClose, onConfirm }) => {
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState('virement');
-  const [date, setDate] = useState('2024-10-15');
-  const [notes, setNotes] = useState('');
+const ClientTypeBadge: React.FC<{ type: ClientType }> = ({ type }) =>
+  type === 'COMPANY'
+    ? <span className="px-2 py-0.5 rounded text-xs font-medium bg-indigo-500/15 text-indigo-400">Société</span>
+    : <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-500/15 text-slate-300">Particulier</span>;
 
-  const amountNum = parseFloat(amount) || 0;
-  const newBalance = Math.max(0, account.outstandingBalance - amountNum);
+// ─── Settle Modal ─────────────────────────────────────────────────────────────
+
+const SettleModal: React.FC<{
+  credit: Credit;
+  onClose: () => void;
+  onConfirm: (creditId: number, amountPaid: number, method: string, reference: string) => void;
+}> = ({ credit, onClose, onConfirm }) => {
+  const [amount, setAmount]     = useState('');
+  const [method, setMethod]     = useState('Virement');
+  const [reference, setRef]     = useState('');
+
+  const amountNum  = parseFloat(amount) || 0;
+  const newBalance = Math.max(0, credit.amount - amountNum);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -26,72 +61,53 @@ const SettleModal: React.FC<{ account: CreditAccount; onClose: () => void; onCon
       <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-md mx-4 shadow-2xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <div>
-            <h2 className="text-white font-bold text-lg">Régler le Paiement de Crédit</h2>
-            <p className="text-slate-400 text-xs mt-0.5">{account.company}</p>
+            <h2 className="text-white font-bold text-lg">Régler le Paiement</h2>
+            <p className="text-slate-400 text-xs mt-0.5">{credit.client.name} · Crédit #{String(credit.id).padStart(3,'0')}</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
-            <span className="material-symbols-outlined">close</span>
-          </button>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-xl leading-none">✕</button>
         </div>
         <div className="p-6 space-y-4">
           <div className="bg-slate-800/40 rounded-xl p-4 flex items-center justify-between">
-            <span className="text-sm text-slate-400">Solde Actuel</span>
-            <span className="text-lg font-black text-rose-400">GNF {account.outstandingBalance.toLocaleString('fr-FR')}</span>
+            <span className="text-sm text-slate-400">Montant dû</span>
+            <span className="text-lg font-black text-rose-400">{fmt(credit.amount)}</span>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Montant à Payer (GNF)</label>
-            <input
-              type="number"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-            />
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Montant à payer (GNF)</label>
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+              placeholder="0"
+              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Date de Paiement</label>
-              <input
-                type="date"
-                value={date}
-                onChange={e => setDate(e.target.value)}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Méthode de Paiement</label>
-              <select
-                value={method}
-                onChange={e => setMethod(e.target.value)}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              >
-                <option value="virement">Virement</option>
-                <option value="chèque">Chèque</option>
-                <option value="espèces">Espèces</option>
-                <option value="carte">Carte</option>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Méthode</label>
+              <select value={method} onChange={e => setMethod(e.target.value)}
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50">
+                <option>Virement</option>
+                <option>Espèces</option>
+                <option>Chèque</option>
+                <option>Carte</option>
               </select>
             </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Notes / Référence</label>
-            <input
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-            />
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Référence</label>
+              <input value={reference} onChange={e => setRef(e.target.value)}
+                placeholder="Optionnel"
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50" />
+            </div>
           </div>
           <div className="bg-slate-800/40 rounded-xl p-4 flex items-center justify-between">
-            <span className="text-sm text-slate-400">Nouveau Solde Restant</span>
+            <span className="text-sm text-slate-400">Solde restant après paiement</span>
             <span className={`text-lg font-black ${newBalance <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-              GNF {Math.max(newBalance, 0).toLocaleString('fr-FR')}
+              {fmt(newBalance)}
             </span>
           </div>
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">Annuler</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">Annuler</button>
           <button
-            onClick={() => { onConfirm(account.id, amountNum); onClose(); }}
-            className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
+            disabled={amountNum <= 0}
+            onClick={() => { onConfirm(credit.id, amountNum, method, reference); onClose(); }}
+            className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Confirmer le Paiement
           </button>
@@ -101,94 +117,184 @@ const SettleModal: React.FC<{ account: CreditAccount; onClose: () => void; onCon
   );
 };
 
-const CreditAccountModal: React.FC<{ onClose: () => void; onSave: (data: Partial<CreditAccount>) => void }> = ({ onClose, onSave }) => {
-  const [form, setForm] = useState({
-    company: '',
-    contact: '',
-    creditLimit: '',
-    outstandingBalance: '0',
-    status: 'actif' as CreditAccount['status'],
-  });
+// ─── Create Credit Modal ──────────────────────────────────────────────────────
+
+const CreateCreditModal: React.FC<{
+  orders: Order[];
+  onClose: () => void;
+  onSave: (data: {
+    clientId: string;
+    orderId: string;
+    amount: number;
+    limitedDate: string;
+    status: CreditStatus;
+  }) => Promise<void> | void;
+}> = ({ orders, onClose, onSave }) => {
+  // Only allow linking to orders that are not cancelled
+  const creditOrders = orders.filter(o => o.status !== 'CANCELLED');
+  const [orderId, setOrderId]     = useState<string>('');
+  const [amount, setAmount]       = useState('');
+  const [limitedDate, setDate]    = useState('');
+  const [status, setStatus]       = useState<CreditStatus>('ACTIVE');
+  const [error, setError]         = useState('');
+  const [saving, setSaving]       = useState(false);
+
+  const selectedOrder = creditOrders.find(o => o.id === orderId);
+
+  const handleSave = async () => {
+    if (!orderId)      { setError('Veuillez sélectionner une commande.'); return; }
+    if (!amount)       { setError('Veuillez saisir un montant.'); return; }
+    if (!limitedDate)  { setError('Veuillez choisir une date limite.'); return; }
+    if (!selectedOrder){ setError('Commande introuvable.'); return; }
+    if (selectedOrder.status === 'CANCELLED') {
+      setError("Impossible de créer un crédit pour une commande annulée.");
+      return;
+    }
+
+    try {
+      setError('');
+      setSaving(true);
+      await onSave({
+        clientId: selectedOrder.clientId,
+        orderId:  selectedOrder.id,
+        amount:   parseFloat(amount),
+        status,
+        limitedDate,
+      });
+      onClose();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Impossible de créer le crédit.";
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-lg mx-4 shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-          <h2 className="text-white font-bold text-lg">Nouveau compte de crédit</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
-            <span className="material-symbols-outlined">close</span>
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={() => { if (!saving) onClose(); }}
+      />
+      <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-lg mx-4 shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 shrink-0">
+          <h2 className="text-white font-bold text-lg">Nouveau Crédit</h2>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="text-slate-400 hover:text-white text-xl leading-none disabled:opacity-50"
+          >
+            ✕
           </button>
         </div>
-        <div className="p-6 space-y-4">
+        <div className="overflow-y-auto flex-1 p-6 space-y-4">
+
+          {/* Order picker */}
           <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Entreprise</label>
-            <input
-              value={form.company}
-              onChange={e => setForm({ ...form, company: e.target.value })}
-              placeholder="Nom de l'entreprise"
-              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Contact</label>
-            <input
-              value={form.contact}
-              onChange={e => setForm({ ...form, contact: e.target.value })}
-              placeholder="Nom du contact"
-              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Limite de crédit (GNF)</label>
-              <input
-                type="number"
-                value={form.creditLimit}
-                onChange={e => setForm({ ...form, creditLimit: e.target.value })}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Solde impayé (GNF)</label>
-              <input
-                type="number"
-                value={form.outstandingBalance}
-                onChange={e => setForm({ ...form, outstandingBalance: e.target.value })}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Statut</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+              Commande liée <span className="text-rose-400">*</span>
+            </label>
             <select
-              value={form.status}
-              onChange={e => setForm({ ...form, status: e.target.value as CreditAccount['status'] })}
+              value={orderId}
+              onChange={e => { setOrderId(e.target.value); setError(''); }}
               className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
             >
-              <option value="actif">Actif</option>
-              <option value="avertissement">Avertissement</option>
-              <option value="bloqué">Bloqué</option>
+              <option value="">Sélectionner une commande à crédit</option>
+              {creditOrders.map(o => (
+                <option key={o.id} value={o.id}>
+                   {o.client.name} · {fmt(o.total)}
+                </option>
+              ))}
             </select>
           </div>
+
+          {/* Selected order preview */}
+          {selectedOrder && (
+          <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 space-y-2">
+              {selectedOrder.client && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Client</span>
+                  <div className="flex items-center gap-2">
+                    <ClientTypeBadge type={selectedOrder.client.type} />
+                    <span className="text-sm font-semibold text-white">{selectedOrder.client.name}</span>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">Total commande</span>
+                <span className="text-sm font-bold text-white">{fmt(selectedOrder.total)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">Date commande</span>
+                <span className="text-sm text-slate-300">{fmtDate(selectedOrder.createdAt)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">Limite de crédit client</span>
+                <span className="text-sm font-semibold text-cyan-400">{fmt(selectedOrder.client.creditLimit)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Amount */}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+              Montant du crédit (GNF) <span className="text-rose-400">*</span>
+            </label>
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+              placeholder="Ex: 500000"
+              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50" />
+            {selectedOrder && parseFloat(amount) > selectedOrder.client.creditLimit && (
+              <p className="mt-1 text-xs text-amber-400">⚠ Dépasse la limite de crédit du client</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {/* Due date */}
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                Date limite <span className="text-rose-400">*</span>
+              </label>
+              <input type="date" value={limitedDate} onChange={e => setDate(e.target.value)}
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50" />
+            </div>
+            {/* Status */}
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Statut</label>
+              <select value={status} onChange={e => setStatus(e.target.value as CreditStatus)}
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50">
+                <option value="ACTIVE">Actif</option>
+                <option value="PAID">Payé</option>
+                <option value="EXPIRED">Expiré</option>
+                <option value="CANCELED">Annulé</option>
+              </select>
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">{error}</p>
+          )}
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">Annuler</button>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800 shrink-0">
           <button
-            onClick={() => {
-              onSave({
-                company: form.company,
-                contact: form.contact,
-                creditLimit: parseFloat(form.creditLimit) || 0,
-                outstandingBalance: parseFloat(form.outstandingBalance) || 0,
-                status: form.status,
-                lastPayment: 'Jamais',
-              });
-              onClose();
-            }}
-            className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors disabled:opacity-50"
           >
-            Créer le compte
+            Annuler
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          >
+            {saving && (
+              <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            )}
+            Créer le crédit
           </button>
         </div>
       </div>
@@ -196,350 +302,568 @@ const CreditAccountModal: React.FC<{ onClose: () => void; onSave: (data: Partial
   );
 };
 
-const CreditDetail: React.FC<{ account: CreditAccount; onBack: () => void; onSettle: (accountId: string, amountPaid: number) => void }> = ({ account, onBack, onSettle }) => {
+// ─── Credit Detail ────────────────────────────────────────────────────────────
+
+const CreditDetail: React.FC<{
+  credit: Credit;
+  onBack: () => void;
+  onSettle: (creditId: number, amountPaid: number, method: string, reference: string) => void;
+  onStatusChange: (creditId: number, status: CreditStatus) => void;
+}> = ({ credit, onBack, onSettle, onStatusChange }) => {
   const [showSettle, setShowSettle] = useState(false);
-  const availableCredit = account.creditLimit - account.outstandingBalance;
-  const utilization = (account.outstandingBalance / account.creditLimit) * 100;
+  const days = daysUntil(credit.limitedDate);
+  const isOverdue = days < 0;
 
   return (
     <div className="p-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <button onClick={onBack} className="text-[#137fec] hover:text-blue-400 transition-colors font-medium">Portail Grossiste</button>
-        <span className="material-symbols-outlined text-slate-500 text-base">chevron_right</span>
-        <button onClick={onBack} className="text-[#137fec] hover:text-blue-400 transition-colors font-medium">Portefeuille Clients</button>
-        <span className="material-symbols-outlined text-slate-500 text-base">chevron_right</span>
-        <span className="text-white font-medium">{account.company}</span>
+        <button onClick={onBack} className="text-[#137fec] hover:text-blue-400 font-medium transition-colors">
+          Gestion du Crédit
+        </button>
+        <span className="text-slate-500">›</span>
+        <span className="text-white font-medium">Crédit #{String(credit.id).padStart(3,'0')}</span>
       </div>
 
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">{account.company}</h1>
-          <p className="text-slate-400 text-sm mt-1">Contact : {account.contact}</p>
+            <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-2xl font-black text-white tracking-tight">{credit.client?.name ?? 'Client inconnu'}</h1>
+            {credit.client && <ClientTypeBadge type={credit.client.type} />}
+            <CreditStatusBadge status={credit.status} />
+          </div>
+          <p className="text-slate-400 text-sm">
+            Crédit #{String(credit.id).padStart(3,'0')} · Commande #{String(credit.orderId).padStart(3,'0')} · Créé le {fmtDate(credit.createdAt)}
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-sm font-medium hover:bg-slate-800/50 transition-colors">
-            <span className="material-symbols-outlined text-lg">download</span>
-            Télécharger le Relevé
+          <button onClick={onBack}
+            className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-sm font-medium hover:bg-slate-800/50 transition-colors">
+            ← Retour
           </button>
-          <button
-            onClick={() => setShowSettle(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
-          >
-            <span className="material-symbols-outlined text-lg">payments</span>
-            Ajouter un Paiement
-          </button>
+          {credit.status === 'ACTIVE' && (
+            <button onClick={() => setShowSettle(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors">
+              💳 Enregistrer un paiement
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Limite de Crédit Actuelle</p>
-          <p className="text-2xl font-black text-white">GNF {account.creditLimit.toLocaleString('fr-FR')}</p>
-          <p className="text-xs text-slate-400 mt-2">Bonne situation</p>
+      {/* Overdue banner */}
+      {isOverdue && credit.status === 'ACTIVE' && (
+        <div className="flex items-center gap-3 bg-rose-500/10 border border-rose-500/30 rounded-xl px-5 py-3">
+          <span className="text-rose-400 text-lg">⚠</span>
+          <p className="text-sm text-rose-300 font-medium">
+            Ce crédit est en retard de <span className="font-black">{Math.abs(days)} jour(s)</span>. Échéance était le {fmtDate(credit.limitedDate)}.
+          </p>
         </div>
-        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Solde Impayé</p>
-          <p className="text-2xl font-black text-rose-400">GNF {account.outstandingBalance.toLocaleString('fr-FR')}</p>
-          <div className="mt-2">
-            <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-              <div className="h-full bg-rose-400 rounded-full" style={{ width: `${utilization}%` }} />
-            </div>
-            <p className="text-xs text-slate-400 mt-1">{utilization.toFixed(0)}% utilisé</p>
-          </div>
-        </div>
-        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Crédit Disponible</p>
-          <p className="text-2xl font-black text-emerald-400">GNF {availableCredit.toLocaleString('fr-FR')}</p>
-          <p className="text-xs text-slate-400 mt-2">Échéance dans 12 jours</p>
-        </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-3 gap-4">
-        {/* Transaction Ledger */}
-        <div className="col-span-2 bg-[#0d1520] border border-slate-800 rounded-xl">
-          <div className="px-6 py-4 border-b border-slate-800">
-            <h3 className="text-white font-bold">Grand Livre des Transactions</h3>
-            <p className="text-slate-400 text-xs mt-0.5">Affichage 5 sur 42 transactions</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-slate-800">
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Type</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Description</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wider">Montant</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wider">Solde</th>
-                </tr>
-              </thead>
-              <tbody>
-                {creditTransactions.map(tx => (
-                  <tr key={tx.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
-                    <td className="px-6 py-3.5 text-sm text-slate-400">{tx.date}</td>
-                    <td className="px-6 py-3.5">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        tx.type === 'paiement_reçu' ? 'bg-emerald-500/15 text-emerald-400' :
-                        tx.type === 'achat_crédit' ? 'bg-cyan-500/15 text-cyan-400' :
-                        'bg-slate-500/15 text-slate-400'
-                      }`}>
-                        {tx.type === 'achat_crédit' ? 'Achat à Crédit' : tx.type === 'paiement_reçu' ? 'Paiement Reçu' : 'Ajustement'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3.5 text-sm text-slate-300">{tx.description}</td>
-                    <td className={`px-6 py-3.5 text-sm font-semibold text-right ${tx.amount > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                      {tx.amount > 0 ? '+' : ''}GNF {Math.abs(tx.amount).toLocaleString('fr-FR')}
-                    </td>
-                    <td className="px-6 py-3.5 text-sm font-semibold text-right text-white">GNF {tx.balance.toLocaleString('fr-FR')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Montant du crédit</p>
+          <p className="text-2xl font-black text-rose-400">{fmt(credit.amount)}</p>
         </div>
-
-        {/* Side Panels */}
-        <div className="space-y-4">
-          <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-            <h3 className="text-white font-bold mb-4">Conditions de Crédit</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-sm text-slate-400">Conditions de Paiement</span>
-                <span className="text-sm font-medium text-white">Net 30 Jours</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-slate-400">Taux Standard</span>
-                <span className="text-sm font-medium text-white">8.5%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-slate-400">Frais de Retard</span>
-                <span className="text-sm font-medium text-amber-400">Net 15</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-slate-400">Dernière Révision</span>
-                <span className="text-sm font-medium text-white">01 Oct 2024</span>
-              </div>
-            </div>
-          </div>
-          <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-            <h3 className="text-white font-bold mb-4">Contact de Facturation</h3>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-9 h-9 bg-[#137fec]/15 rounded-full flex items-center justify-center">
-                <span className="material-symbols-outlined text-[#137fec] text-base">person</span>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-white">{account.contact}</p>
-                <p className="text-xs text-slate-400">Responsable des Comptes Fournisseurs</p>
-              </div>
-            </div>
-            <p className="text-xs text-slate-400">Centre de Distribution du New Jersey</p>
+        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Date limite</p>
+          <p className="text-lg font-black text-white">{fmtDate(credit.limitedDate)}</p>
+          <p className={`text-xs mt-1 ${isOverdue ? 'text-rose-400' : days <= 7 ? 'text-amber-400' : 'text-slate-400'}`}>
+            {isOverdue ? `${Math.abs(days)}j de retard` : `Dans ${days} jour(s)`}
+          </p>
+        </div>
+        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Limite client</p>
+          <p className="text-2xl font-black text-white">{fmt(credit.client.creditLimit)}</p>
+        </div>
+        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Statut</p>
+          <div className="flex items-center gap-2 mt-1">
+            <CreditStatusBadge status={credit.status} />
+            <select
+              value={credit.status}
+              onChange={e => onStatusChange(credit.id, e.target.value as CreditStatus)}
+              className="bg-slate-800/50 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-300 focus:outline-none"
+            >
+              <option value="ACTIVE">Actif</option>
+              <option value="PAID">Payé</option>
+              <option value="EXPIRED">Expiré</option>
+              <option value="CANCELED">Annulé</option>
+            </select>
           </div>
         </div>
       </div>
 
-      {showSettle && <SettleModal account={account} onClose={() => setShowSettle(false)} onConfirm={onSettle} />}
+      {/* Client info & Order info */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+            <span className="text-[#137fec]">👤</span> Client
+          </h3>
+            <div className="space-y-2.5">
+              {credit.client && (
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-400">Nom</span>
+                  <span className="text-sm font-semibold text-white">{credit.client.name}</span>
+                </div>
+              )}
+            {credit.client && credit.client.phone && (
+              <div className="flex justify-between">
+                <span className="text-xs text-slate-400">Téléphone</span>
+                <span className="text-sm text-slate-300">{credit.client.phone}</span>
+              </div>
+            )}
+            {credit.client && credit.client.email && (
+              <div className="flex justify-between">
+                <span className="text-xs text-slate-400">Email</span>
+                <span className="text-sm text-slate-300">{credit.client.email}</span>
+              </div>
+            )}
+            {credit.client && credit.client.address && (
+              <div className="flex justify-between">
+                <span className="text-xs text-slate-400">Adresse</span>
+                <span className="text-sm text-slate-300">{credit.client.address}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-xs text-slate-400">Type</span>
+              {credit.client && <ClientTypeBadge type={credit.client.type} />}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+            <span className="text-[#137fec]">🧾</span> Commande liée #{String(credit.orderId).padStart(3,'0')}
+          </h3>
+          <div className="space-y-2.5">
+            <div className="flex justify-between">
+              <span className="text-xs text-slate-400">Total commande</span>
+              <span className="text-sm font-bold text-white">{fmt(credit.orders.total)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-xs text-slate-400">Statut commande</span>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                credit.orders.status === 'PAID'      ? 'bg-emerald-500/15 text-emerald-400' :
+                credit.orders.status === 'PENDING'   ? 'bg-amber-500/15 text-amber-400'    :
+                credit.orders.status === 'DELIVERED' ? 'bg-blue-500/15 text-blue-400'      :
+                                                       'bg-rose-500/15 text-rose-400'
+              }`}>
+                {credit.orders.status === 'PAID' ? 'Payé' : credit.orders.status === 'PENDING' ? 'En Attente' : credit.orders.status === 'DELIVERED' ? 'Livré' : 'Annulé'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-xs text-slate-400">Date commande</span>
+              <span className="text-sm text-slate-300">{fmtDate(credit.orders.createdAt)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-xs text-slate-400">Nb articles</span>
+              <span className="text-sm text-slate-300">
+                {credit.orders.items.reduce((s,i) => s + i.quantity, 0) || '—'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showSettle && (
+        <SettleModal
+          credit={credit}
+          onClose={() => setShowSettle(false)}
+          onConfirm={onSettle}
+        />
+      )}
     </div>
   );
 };
 
-const Credit: React.FC = () => {
-  const [accounts, setAccounts] = useState(initialAccounts);
-  const [selectedAccount, setSelectedAccount] = useState<CreditAccount | null>(null);
-  const [settleAccount, setSettleAccount] = useState<CreditAccount | null>(null);
-  const [search, setSearch] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState<CreditAccount | null>(null);
+// ─── Main Credit Component ────────────────────────────────────────────────────
 
-  const handleSettle = (accountId: string, amountPaid: number) => {
-    setAccounts(accounts.map(a =>
-      a.id === accountId
-        ? { ...a, outstandingBalance: Math.max(0, a.outstandingBalance - amountPaid), lastPayment: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) }
-        : a
-    ));
-    setSettleAccount(null);
+const CreditPage: React.FC = () => {
+  const [credits, setCredits]           = useState<Credit[]>([]);
+  const [orders, setOrders]             = useState<Order[]>([]);
+  const [selectedCredit, setSelected]   = useState<Credit | null>(null);
+  const [settleCredit, setSettle]       = useState<Credit | null>(null);
+  const [showCreate, setShowCreate]     = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<Credit | null>(null);
+  const [search, setSearch]             = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | CreditStatus>('all');
+  const [loading, setLoading]           = useState(false);
+  const [loadError, setLoadError]       = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const [apiCredits, apiOrders] = await Promise.all([
+          fetchCredits(),
+          fetchOrders(),
+        ]);
+        if (!cancelled) {
+          setCredits(apiCredits);
+          if (Array.isArray(apiOrders)) {
+            setOrders(apiOrders as Order[]);
+          }
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Erreur lors du chargement des crédits.";
+          setLoadError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleOpenCreate = async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+      const apiOrders = await fetchOrders();
+      if (Array.isArray(apiOrders)) {
+        setOrders(apiOrders as Order[]);
+      }
+      setShowCreate(true);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erreur lors du chargement des commandes.";
+      setLoadError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleCreateAccount = (data: Partial<CreditAccount>) => {
-    const id = `CR${String(accounts.length + 1).padStart(3, '0')}`;
-    setAccounts([...accounts, {
-      id,
-      company: data.company || '',
-      contact: data.contact || '',
-      creditLimit: data.creditLimit || 0,
-      outstandingBalance: data.outstandingBalance ?? 0,
-      status: data.status || 'actif',
-      lastPayment: data.lastPayment || 'Jamais',
-    }]);
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const handleCreate = async (data: {
+    clientId: string;
+    orderId: string;
+    amount: number;
+    limitedDate: string;
+    status: CreditStatus;
+  }) => {
+    try {
+      const created = await createCredit({
+        clientId: data.clientId,
+        orderId: data.orderId,
+        amount: data.amount,
+        limitedDate: data.limitedDate,
+      });
+      setCredits(prev => [created, ...prev]);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Impossible de créer le crédit.";
+      setLoadError(message);
+    }
   };
 
-  const handleDeleteAccount = (id: string) => {
-    setAccounts(accounts.filter(a => a.id !== id));
-    setSelectedAccount(null);
+  const handleSettle = (creditId: number, amountPaid: number, method: string, reference: string) => {
+    setCredits(prev => prev.map(c => {
+      if (c.id !== creditId) return c;
+      const newAmount = Math.max(0, c.amount - amountPaid);
+      return { ...c, amount: newAmount, status: newAmount <= 0 ? 'PAID' : c.status };
+    }));
+    setSettle(null);
+  };
+
+  const handleStatusChange = async (creditId: number, status: CreditStatus) => {
+    const previous = credits;
+    setCredits(prev =>
+      prev.map(c => (c.id === creditId ? { ...c, status } : c)),
+    );
+    try {
+      await updateCreditStatus(creditId, status);
+    } catch (err: unknown) {
+      setCredits(previous);
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Impossible de mettre à jour le statut du crédit.";
+      setLoadError(message);
+    }
+  };
+
+  const handleDelete = async (creditId: number) => {
+    const previous = credits;
+    setCredits(prev => prev.filter(c => c.id !== creditId));
+    setSelected(null);
     setDeleteConfirm(null);
+    try {
+      await deleteCredit(creditId);
+    } catch (err: unknown) {
+      // rollback if backend delete failed
+      setCredits(previous);
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Impossible de supprimer le crédit.";
+      setLoadError(message);
+    }
   };
 
-  const currentAccount = selectedAccount ? accounts.find(a => a.id === selectedAccount.id) ?? selectedAccount : null;
-  if (currentAccount) {
-    return <CreditDetail account={currentAccount} onBack={() => setSelectedAccount(null)} onSettle={handleSettle} />;
+  // ── Filters ───────────────────────────────────────────────────────────────
+
+  const filtered = credits.filter(c => {
+    const matchSearch =
+      c.client.name.toLowerCase().includes(search.toLowerCase()) ||
+      String(c.id).includes(search) ||
+      String(c.orderId).includes(search);
+    const matchStatus = statusFilter === 'all' || c.status === statusFilter;
+    return matchSearch && matchStatus;
+  });
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+
+  const totalDebt    = credits.filter(c => c.status === 'ACTIVE' || c.status === 'EXPIRED').reduce((s,c) => s + c.amount, 0);
+  const activeCount  = credits.filter(c => c.status === 'ACTIVE').length;
+  const expiredCount = credits.filter(c => c.status === 'EXPIRED').length;
+  const totalCredit  = credits.reduce((s,c) => s + c.client.creditLimit, 0);
+  const utilization  = totalCredit > 0 ? ((totalDebt / totalCredit) * 100) : 0;
+
+  // ── Detail view ───────────────────────────────────────────────────────────
+
+  const currentCredit = selectedCredit
+    ? credits.find(c => c.id === selectedCredit.id) ?? selectedCredit
+    : null;
+
+  if (currentCredit) {
+    return (
+      <CreditDetail
+        credit={currentCredit}
+        onBack={() => setSelected(null)}
+        onSettle={handleSettle}
+        onStatusChange={handleStatusChange}
+      />
+    );
   }
-
-  const totalDebt = accounts.reduce((s, a) => s + a.outstandingBalance, 0);
-  const totalLimit = accounts.reduce((s, a) => s + a.creditLimit, 0);
-  const utilization = ((totalDebt / totalLimit) * 100).toFixed(1);
-  const activeDebtors = accounts.filter(a => a.status !== 'bloqué').length;
-
-  const filtered = accounts.filter(a =>
-    a.company.toLowerCase().includes(search.toLowerCase()) ||
-    a.contact.toLowerCase().includes(search.toLowerCase())
-  );
 
   return (
     <div className="p-6 space-y-6">
+
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">Gestion du Crédit Grossiste</h1>
-          <p className="text-slate-400 text-sm mt-1">Surveiller l'exposition et gérer les cycles de règlement</p>
+          <h1 className="text-2xl font-black text-white tracking-tight">Gestion du Crédit</h1>
+          <p className="text-slate-400 text-sm mt-1">Suivi des crédits clients liés aux commandes</p>
         </div>
-        <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors">
-          <span className="material-symbols-outlined text-lg">add</span>
-          Nouveau Compte de Crédit
-        </button>
+        <div className="flex items-center gap-3">
+          {loading && (
+            <span className="text-xs text-slate-500">
+              Chargement des crédits…
+            </span>
+          )}
+          {loadError && (
+            <span className="text-xs text-amber-300 max-w-xs text-right">
+              {loadError}
+            </span>
+          )}
+          <button
+            onClick={handleOpenCreate}
+            className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
+          >
+            + Nouveau Crédit
+          </button>
+        </div>
       </div>
 
-      {/* Metric Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-rose-500/15 rounded-lg">
-              <span className="material-symbols-outlined text-rose-400 text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>account_balance</span>
-            </div>
-          </div>
-          <p className="text-2xl font-black text-white">GNF {totalDebt.toLocaleString('fr-FR')}</p>
-          <p className="text-sm text-slate-400 mt-1">Dette Totale du Marché</p>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Total des Crédits</p>
+          <p className="text-2xl font-black text-white">{credits.length}</p>
         </div>
-        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-amber-500/15 rounded-lg">
-              <span className="material-symbols-outlined text-amber-400 text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>donut_large</span>
-            </div>
-          </div>
-          <p className="text-2xl font-black text-white">{utilization}%</p>
-          <p className="text-sm text-slate-400 mt-1">Utilisation du Crédit</p>
+        <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-5">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Montant Impayé</p>
+          <p className="text-2xl font-black text-rose-400">{fmt(totalDebt)}</p>
           <div className="mt-2 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-            <div className="h-full bg-amber-400 rounded-full" style={{ width: `${utilization}%` }} />
+            <div className="h-full bg-rose-400 rounded-full transition-all" style={{ width: `${Math.min(utilization, 100)}%` }} />
           </div>
+          <p className="text-xs text-slate-400 mt-1">{utilization.toFixed(1)}% des limites</p>
         </div>
-        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2 bg-[#137fec]/15 rounded-lg">
-              <span className="material-symbols-outlined text-[#137fec] text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>group</span>
-            </div>
-          </div>
-          <p className="text-2xl font-black text-white">{activeDebtors}</p>
-          <p className="text-sm text-slate-400 mt-1">Débiteurs Actifs</p>
+        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-5">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Actifs</p>
+          <p className="text-2xl font-black text-emerald-400">{activeCount}</p>
+        </div>
+        <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-5">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Expirés</p>
+          <p className="text-2xl font-black text-amber-400">{expiredCount}</p>
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative w-80">
-        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Rechercher des comptes..."
-          className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50"
-        />
+      {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Rechercher (client, ID, commande)..."
+            className="bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-72"
+          />
+        </div>
+        <div className="flex items-center gap-1 bg-slate-800/50 border border-slate-700 rounded-lg p-1">
+          {([
+            { key: 'all',     label: 'Tous'    },
+            { key: 'ACTIVE',  label: 'Actif'   },
+            { key: 'PAID',    label: 'Payé'    },
+            { key: 'EXPIRED', label: 'Expiré' },
+            { key: 'CANCELED',label: 'Annulé' },
+          ] as const).map(f => (
+            <button key={f.key} onClick={() => setStatusFilter(f.key)}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                statusFilter === f.key ? 'bg-[#137fec] text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Accounts Table */}
+      {/* Table */}
       <div className="bg-[#0d1520] border border-slate-800 rounded-xl">
         <div className="px-6 py-4 border-b border-slate-800">
-          <p className="text-sm text-slate-400">Affichage {filtered.length} sur 42 comptes de crédit actifs</p>
+          <p className="text-sm text-slate-400">{filtered.length} crédit(s) affiché(s)</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Entreprise</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Contact</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Limite de Crédit</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Solde Impayé</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Utilisation</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Statut du Compte</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Actions</th>
+                {['ID Crédit', 'Client', 'Commande', 'Montant', 'Date limite', 'Créé le', 'Statut', 'Actions'].map(h => (
+                  <th key={h} className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(acc => {
-                const util = (acc.outstandingBalance / acc.creditLimit) * 100;
+              {filtered.map(credit => {
+                const days = daysUntil(credit.limitedDate);
+                const overdue = days < 0 && credit.status === 'ACTIVE';
                 return (
-                  <tr key={acc.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group">
-                    <td className="px-6 py-4 text-sm font-semibold text-white">{acc.company}</td>
-                    <td className="px-6 py-4 text-sm text-slate-400">{acc.contact}</td>
-                    <td className="px-6 py-4 text-sm font-semibold text-white">GNF {acc.creditLimit.toLocaleString('fr-FR')}</td>
-                    <td className="px-6 py-4 text-sm font-semibold text-rose-400">GNF {acc.outstandingBalance.toLocaleString('fr-FR')}</td>
+                  <tr
+                    key={credit.id}
+                    className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group cursor-pointer"
+                    onClick={() => setSelected(credit)}
+                  >
+                    <td className="px-6 py-4 text-sm font-mono text-[#137fec]">
+                      #{String(credit.id).padStart(3,'0')}
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
-                        <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${util > 90 ? 'bg-rose-400' : util > 70 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${util}%` }} />
+                        <ClientTypeBadge type={credit.client.type} />
+                        <div>
+                          <p className="text-sm font-semibold text-white">{credit.client.name}</p>
+                          {credit.client.phone && (
+                            <p className="text-xs text-slate-500">{credit.client.phone}</p>
+                          )}
                         </div>
-                        <span className="text-xs text-slate-400">{util.toFixed(0)}%</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4"><CreditStatusBadge status={acc.status} /></td>
+                    <td className="px-6 py-4 text-sm font-mono text-slate-400">
+                      #{String(credit.orderId).padStart(3,'0')}
+                    </td>
+                    <td className="px-6 py-4 text-sm font-bold text-rose-400">
+                      {fmt(credit.amount)}
+                    </td>
                     <td className="px-6 py-4">
+                      <p className="text-sm text-white">{fmtDate(credit.limitedDate)}</p>
+                      <p className={`text-xs mt-0.5 ${overdue ? 'text-rose-400 font-semibold' : days <= 7 ? 'text-amber-400' : 'text-slate-500'}`}>
+                        {overdue ? `⚠ ${Math.abs(days)}j de retard` : credit.status !== 'ACTIVE' ? '—' : `Dans ${days}j`}
+                      </p>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-400">
+                      {fmtDate(credit.createdAt)}
+                    </td>
+                    <td className="px-6 py-4">
+                      <CreditStatusBadge status={credit.status} />
+                    </td>
+                    <td className="px-6 py-4" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
-                          onClick={() => setSelectedAccount(acc)}
-                          className="p-1.5 text-slate-400 hover:text-[#137fec] hover:bg-[#137fec]/10 rounded-lg transition-colors text-xs"
-                          title="Historique"
-                        >
-                          <span className="material-symbols-outlined text-base">history</span>
-                        </button>
+                          onClick={() => setSelected(credit)}
+                          className="p-1.5 text-slate-400 hover:text-[#137fec] hover:bg-[#137fec]/10 rounded-lg transition-colors"
+                          title="Voir détail"
+                        >👁</button>
+                        {credit.status === 'ACTIVE' && (
+                          <button
+                            onClick={() => setSettle(credit)}
+                            className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                            title="Enregistrer paiement"
+                          >💳</button>
+                        )}
                         <button
-                          onClick={() => setSettleAccount(acc)}
-                          className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
-                          title="Régler"
-                        >
-                          <span className="material-symbols-outlined text-base">payments</span>
-                        </button>
-                        <button
-                          onClick={() => setAccounts(accounts.map(a => a.id === acc.id ? { ...a, status: a.status === 'bloqué' ? 'actif' : 'bloqué' } : a))}
+                          onClick={() => handleStatusChange(credit.id, credit.status === 'CANCELED' ? 'ACTIVE' : 'CANCELED')}
                           className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors"
-                          title="Bloquer/Débloquer"
-                        >
-                          <span className="material-symbols-outlined text-base">block</span>
-                        </button>
+                          title={credit.status === 'CANCELED' ? 'Réactiver' : 'Annuler'}
+                        >🚫</button>
                         <button
-                          onClick={() => setDeleteConfirm(acc)}
+                          onClick={() => setDeleteConfirm(credit)}
                           className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
                           title="Supprimer"
-                        >
-                          <span className="material-symbols-outlined text-base">delete</span>
-                        </button>
+                        >🗑</button>
                       </div>
                     </td>
                   </tr>
                 );
               })}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-6 py-12 text-center text-slate-500 text-sm">
+                    Aucun crédit trouvé
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {settleAccount && <SettleModal account={settleAccount} onClose={() => setSettleAccount(null)} onConfirm={handleSettle} />}
-      {showCreateModal && <CreditAccountModal onClose={() => setShowCreateModal(false)} onSave={handleCreateAccount} />}
+      {/* Modals */}
+      {settleCredit && (
+        <SettleModal
+          credit={settleCredit}
+          onClose={() => setSettle(null)}
+          onConfirm={handleSettle}
+        />
+      )}
+
+      {showCreate && (
+        <CreateCreditModal
+          orders={orders}
+          onClose={() => setShowCreate(false)}
+          onSave={handleCreate}
+        />
+      )}
+
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirm(null)} />
           <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
-            <h3 className="text-white font-bold text-lg mb-2">Supprimer le compte</h3>
-            <p className="text-slate-400 text-sm mb-4">Êtes-vous sûr de vouloir supprimer <span className="text-white font-medium">{deleteConfirm.company}</span> ?</p>
+            <h3 className="text-white font-bold text-lg mb-2">Supprimer le crédit</h3>
+            <p className="text-slate-400 text-sm mb-1">
+              Supprimer le crédit <span className="text-white font-semibold">#{String(deleteConfirm.id).padStart(3,'0')}</span> de{' '}
+              <span className="text-white font-semibold">{deleteConfirm.client.name}</span> ?
+            </p>
+            <p className="text-xs text-slate-500 mb-4">Cette action est irréversible.</p>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">Annuler</button>
-              <button onClick={() => handleDeleteAccount(deleteConfirm.id)} className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors">Supprimer</button>
+              <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">Annuler</button>
+              <button onClick={() => handleDelete(deleteConfirm.id)} className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors">Supprimer</button>
             </div>
           </div>
         </div>
@@ -548,4 +872,4 @@ const Credit: React.FC = () => {
   );
 };
 
-export default Credit;
+export default CreditPage;

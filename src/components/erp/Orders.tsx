@@ -1,208 +1,661 @@
-import React, { useState } from 'react';
-import { orders as initialOrders, type Order } from '@/data/erp-data';
+import React, { useEffect, useState } from 'react';
+import { fetchOrders, createOrder, updateOrder, updateOrderStatus, cancelOrder, deleteOrder, type CreateOrderPayload } from '@/api/orders';
+import { fetchProducts as fetchProductsApi } from '@/api/products';
+import { fetchClients, type Client as ApiClient } from '@/api/clients';
 
-const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
-  const map: Record<string, { label: string; cls: string }> = {
-    payé: { label: 'Payé', cls: 'bg-emerald-500/15 text-emerald-400' },
-    en_attente: { label: 'En Attente', cls: 'bg-amber-500/15 text-amber-400' },
-    en_traitement: { label: 'En Traitement', cls: 'bg-blue-500/15 text-blue-400' },
-    livré: { label: 'Livré', cls: 'bg-emerald-500/15 text-emerald-400' },
-    annulé: { label: 'Annulé', cls: 'bg-rose-500/15 text-rose-400' },
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type ClientType = 'INDIVIDUAL' | 'COMPANY';
+type OrderStatus = 'PENDING' | 'PAID' | 'CANCELLED' | 'DELIVERED';
+
+interface Client {
+  id: number;
+  type: ClientType;
+  name: string;
+  email?: string;
+  creditLimit: number;
+}
+
+interface Product {
+  id: number;
+  name: string;
+  sku: string;
+  price: number;
+  isActive?: boolean;
+  // Optional display info for variants
+  sizeName?: string;
+  colorName?: string;
+}
+
+interface OrderItem {
+  id: number;
+  orderId: number;
+  productId: number;
+  quantity: number;
+  price: number;
+  product: Product;
+  size?: string | null;
+  color?: string | null;
+}
+
+interface Payment {
+  id: number;
+  orderId: number;
+  amount: number;
+  method: string;
+  reference?: string;
+  createdAt: string;
+}
+
+interface Order {
+  id: number;
+  clientId: number;
+  client: Client;
+  status: OrderStatus;
+  total: number;
+  isCredit: boolean;
+  createdAt: string;
+  items: OrderItem[];
+  payments: Payment[];
+}
+
+interface CartItem {
+  product: Product;
+  quantity: number;
+  price: number;
+  size?: string;
+  color?: string;
+}
+
+// Local options for size/color selection when adding items to an order
+const ORDER_SIZE_OPTIONS: string[] = [
+  'XS', 'S', 'M', 'L', 'XL', 'XXL',
+  '36', '38', '40', '42', '44', '46', '48', '50',
+];
+
+const ORDER_COLOR_OPTIONS: { id: string; label: string; hex: string }[] = [
+  { id: 'black',  label: 'Noir',  hex: '#000000' },
+  { id: 'white',  label: 'Blanc', hex: '#FFFFFF' },
+  { id: 'red',    label: 'Rouge', hex: '#EF4444' },
+  { id: 'blue',   label: 'Bleu',  hex: '#3B82F6' },
+  { id: 'green',  label: 'Vert',  hex: '#10B981' },
+  { id: 'yellow', label: 'Jaune', hex: '#F59E0B' },
+  { id: 'purple', label: 'Violet', hex: '#8B5CF6' },
+  { id: 'orange', label: 'Orange', hex: '#F97316' },
+  { id: 'pink',   label: 'Rose',  hex: '#EC4899' },
+  { id: 'brown',  label: 'Brun',  hex: '#854D3D' },
+  { id: 'gray',   label: 'Gris',  hex: '#6B7280' },
+  { id: 'silver', label: 'Argent', hex: '#9CA3AF' },
+  { id: 'gold',   label: 'Or',    hex: '#D97706' },
+];
+
+// Orders are now loaded from the API, not mocked locally.
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+
+const fmt = (n: number) =>
+  `GNF ${n.toLocaleString('fr-FR', { minimumFractionDigits: 0 })}`;
+
+// ─── Badges ───────────────────────────────────────────────────────────────────
+
+const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
+  const map: Record<OrderStatus, { label: string; cls: string }> = {
+    PAID:      { label: 'Payé',       cls: 'bg-emerald-500/15 text-emerald-400' },
+    PENDING:   { label: 'En Attente', cls: 'bg-amber-500/15 text-amber-400'    },
+    DELIVERED: { label: 'Livré',      cls: 'bg-blue-500/15 text-blue-400'      },
+    CANCELLED: { label: 'Annulé',     cls: 'bg-rose-500/15 text-rose-400'      },
   };
-  const s = map[status] || { label: status, cls: 'bg-slate-500/15 text-slate-400' };
-  return <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${s.cls}`}>{s.label}</span>;
+  const s = map[status];
+  return (
+    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${s.cls}`}>
+      {s.label}
+    </span>
+  );
 };
 
-const TypeBadge: React.FC<{ type: string }> = ({ type }) => {
-  const map: Record<string, { label: string; cls: string }> = {
-    détail: { label: 'Détail', cls: 'bg-slate-500/15 text-slate-300' },
-    gros: { label: 'Gros', cls: 'bg-indigo-500/15 text-indigo-400' },
-    crédit: { label: 'Crédit', cls: 'bg-cyan-500/15 text-cyan-400' },
-  };
-  const t = map[type] || { label: type, cls: 'bg-slate-500/15 text-slate-400' };
-  return <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.cls}`}>{t.label}</span>;
+const ClientTypeBadge: React.FC<{ type: ClientType; isCredit: boolean }> = ({ type, isCredit }) => {
+  if (isCredit)
+    return <span className="px-2 py-0.5 rounded text-xs font-medium bg-cyan-500/15 text-cyan-400">Crédit</span>;
+  if (type === 'COMPANY')
+    return <span className="px-2 py-0.5 rounded text-xs font-medium bg-indigo-500/15 text-indigo-400">Société</span>;
+  return <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-500/15 text-slate-300">Particulier</span>;
 };
 
-// Placeholder line items for detail view (mock data derived from order)
-const getOrderLineItems = (order: Order) => {
-  const count = order.items;
-  const avg = order.amount / count;
-  return Array.from({ length: count }, (_, i) => ({
-    id: `L${i + 1}`,
-    product: `Article ${i + 1}`,
-    sku: `SKU-${order.id}-${i + 1}`,
-    qty: 1,
-    unitPrice: i === count - 1 ? order.amount - avg * (count - 1) : avg,
-    total: i === count - 1 ? order.amount - avg * (count - 1) : avg,
-  }));
-};
+// ─── Product Picker Modal ─────────────────────────────────────────────────────
 
-const OrderCreateModal: React.FC<{ onClose: () => void; onSave: (order: Partial<Order>) => void }> = ({ onClose, onSave }) => {
-  const [form, setForm] = useState({
-    customer: '',
-    type: 'détail' as Order['type'],
-    status: 'en_attente' as Order['status'],
-    amount: '',
-    items: '1',
-    date: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }),
-  });
+const ProductPickerModal: React.FC<{
+  products: Product[];
+  existingIds: number[];
+  onAdd: (product: Product) => void;
+  onClose: () => void;
+}> = ({ products, existingIds, onAdd, onClose }) => {
+  const [query, setQuery] = useState('');
+
+  const results = products.filter(
+    p =>
+      p.isActive !== false &&
+      !existingIds.includes(p.id) &&
+      (p.name.toLowerCase().includes(query.toLowerCase()) ||
+        p.sku.toLowerCase().includes(query.toLowerCase()))
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-lg mx-4 shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-          <h2 className="text-white font-bold text-lg">Nouvelle commande</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
-            <span className="material-symbols-outlined">close</span>
-          </button>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-[#0d1520] border border-slate-700 rounded-2xl w-full max-w-md mx-4 shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <h3 className="text-white font-bold text-base">Ajouter un produit</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-lg leading-none">✕</button>
         </div>
-        <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Client</label>
+        {/* Search */}
+        <div className="px-5 pt-4 pb-2">
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
             <input
-              value={form.customer}
-              onChange={e => setForm({ ...form, customer: e.target.value })}
-              placeholder="Nom du client"
-              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
+              autoFocus
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Nom du produit ou SKU..."
+              className="w-full bg-slate-800/60 border border-slate-700 rounded-lg pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#137fec]/60"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Type</label>
-              <select
-                value={form.type}
-                onChange={e => setForm({ ...form, type: e.target.value as Order['type'] })}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              >
-                <option value="détail">Détail</option>
-                <option value="gros">Gros</option>
-                <option value="crédit">Crédit</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Statut</label>
-              <select
-                value={form.status}
-                onChange={e => setForm({ ...form, status: e.target.value as Order['status'] })}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              >
-                <option value="en_attente">En Attente</option>
-                <option value="payé">Payé</option>
-                <option value="en_traitement">En Traitement</option>
-                <option value="livré">Livré</option>
-                <option value="annulé">Annulé</option>
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Montant (GNF)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.amount}
-                onChange={e => setForm({ ...form, amount: e.target.value })}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Nombre d'articles</label>
-              <input
-                type="number"
-                min="1"
-                value={form.items}
-                onChange={e => setForm({ ...form, items: e.target.value })}
-                className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-              />
-            </div>
-          </div>
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">Annuler</button>
-          <button
-            onClick={() => {
-              onSave({
-                customer: form.customer,
-                type: form.type,
-                status: form.status,
-                amount: parseFloat(form.amount) || 0,
-                items: parseInt(form.items) || 1,
-                date: form.date,
-              });
-              onClose();
-            }}
-            className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
-          >
-            Créer la commande
-          </button>
+        {/* Results */}
+        <div className="px-3 pb-3 max-h-72 overflow-y-auto space-y-1">
+          {results.length === 0 ? (
+            <p className="text-center text-slate-500 text-sm py-8">Aucun produit trouvé</p>
+          ) : (
+            results.map(p => (
+              <button
+                key={p.id}
+                onClick={() => { onAdd(p); onClose(); }}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-xl hover:bg-slate-800/60 transition-colors group text-left"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-white group-hover:text-[#137fec] transition-colors">{p.name}</p>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5">{p.sku}</p>
+                </div>
+                <div className="text-right shrink-0 ml-4">
+                  <p className="text-sm font-bold text-emerald-400">{fmt(p.price)}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">/ unité</p>
+                </div>
+              </button>
+            ))
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-const OrderDetail: React.FC<{ order: Order; onBack: () => void; onStatusChange: (id: string, status: Order['status']) => void; onDelete?: (id: string) => void }> = ({ order, onBack, onStatusChange, onDelete }) => {
-  const lineItems = getOrderLineItems(order);
+// ─── Order Create Modal ───────────────────────────────────────────────────────
+
+const OrderCreateModal: React.FC<{
+  onClose: () => void;
+  onSave: (payload: CreateOrderPayload) => Promise<void> | void;
+  products: Product[];
+  initialOrder?: Order | null;
+}> = ({ onClose, onSave, products, initialOrder }) => {
+  const [form, setForm] = useState({
+    clientName: '',
+    clientType: 'INDIVIDUAL' as ClientType,
+    clientEmail: '',
+    status: 'PENDING' as OrderStatus,
+    isCredit: false,
+  });
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [clients, setClients] = useState<ApiClient[]>([]);
+  const [loadingClients, setLoadingClients] = useState(true);
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingClients(true);
+      try {
+        const list = await fetchClients();
+        if (!cancelled) setClients(list);
+      } catch {
+        if (!cancelled) setClients([]);
+      } finally {
+        if (!cancelled) setLoadingClients(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Prefill when editing an existing order
+  useEffect(() => {
+    if (!initialOrder) return;
+    // Preselect client
+    setSelectedClientId(String(initialOrder.clientId));
+    // Prefill credit toggle
+    setForm(prev => ({ ...prev, isCredit: initialOrder.isCredit }));
+    // Prefill cart from existing items
+    if (Array.isArray(initialOrder.items) && initialOrder.items.length > 0) {
+      const mapped: CartItem[] = initialOrder.items.map((it) => ({
+        product: it.product,
+        quantity: it.quantity,
+        price: it.price,
+        size: it.size ?? undefined,
+        color: it.color ?? undefined,
+      }));
+      setCart(mapped);
+    }
+  }, [initialOrder]);
+
+  const total = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+
+  const addProduct = (product: Product) => {
+    setCart(prev => [
+      ...prev,
+      {
+        product,
+        quantity: 1,
+        price: product.price,
+        size: product.sizeName,
+        color: product.colorName,
+      },
+    ]);
+  };
+
+  const updateQty = (productId: number, qty: number) => {
+    if (qty < 1) return;
+    setCart(prev => prev.map(i => i.product.id === productId ? { ...i, quantity: qty } : i));
+  };
+
+  const removeItem = (productId: number) => {
+    setCart(prev => prev.filter(i => i.product.id !== productId));
+  };
+
+  const updateItemSize = (productId: number, size: string) => {
+    setCart(prev =>
+      prev.map(i =>
+        i.product.id === productId ? { ...i, size } : i,
+      ),
+    );
+  };
+
+  const updateItemColor = (productId: number, color: string) => {
+    setCart(prev =>
+      prev.map(i =>
+        i.product.id === productId ? { ...i, color } : i,
+      ),
+    );
+  };
+
+  const handleSave = async () => {
+    setError('');
+    const clientId = selectedClientId.trim();
+    if (!clientId) {
+      setError("Veuillez sélectionner un client.");
+      return;
+    }
+    if (cart.length === 0) {
+      setError("Veuillez ajouter au moins un produit à la commande.");
+      return;
+    }
+
+    const items = cart.map((c) => ({
+      productId: c.product.id,
+      quantity: c.quantity,
+      size: c.size ?? null,
+      color: c.color ?? null,
+    }));
+
+    try {
+      setSaving(true);
+      await onSave({ clientId, isCredit: form.isCredit, items });
+      onClose();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erreur lors de la création de la commande.";
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+        <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-xl mx-4 shadow-2xl flex flex-col max-h-[90vh]">
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 shrink-0">
+            <h2 className="text-white font-bold text-lg">Nouvelle commande</h2>
+            <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">✕</button>
+          </div>
+
+          <div className="overflow-y-auto flex-1">
+            {/* Client section */}
+            <div className="p-6 space-y-4 border-b border-slate-800/60">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Informations client</p>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Client</label>
+                <select
+                  value={selectedClientId}
+                  onChange={e => setSelectedClientId(e.target.value)}
+                  disabled={loadingClients}
+                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
+                >
+                  <option value="">— Choisir un client —</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.email ?? '—'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Type de client</label>
+                  <select
+                    value={form.clientType}
+                    onChange={e => setForm({ ...form, clientType: e.target.value as ClientType })}
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
+                  >
+                    <option value="INDIVIDUAL">Particulier</option>
+                    <option value="COMPANY">Société</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Statut</label>
+                  <select
+                    value={form.status}
+                    onChange={e => setForm({ ...form, status: e.target.value as OrderStatus })}
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
+                  >
+                    <option value="PENDING">En Attente</option>
+                    <option value="PAID">Payé</option>
+                    <option value="DELIVERED">Livré</option>
+                    <option value="CANCELLED">Annulé</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Email (optionnel)</label>
+                <input
+                  type="email"
+                  value={form.clientEmail}
+                  onChange={e => setForm({ ...form, clientEmail: e.target.value })}
+                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
+                />
+              </div>
+              {/* Credit toggle */}
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <div
+                  onClick={() => setForm({ ...form, isCredit: !form.isCredit })}
+                  className={`w-10 h-6 rounded-full transition-colors relative ${form.isCredit ? 'bg-cyan-500' : 'bg-slate-700'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.isCredit ? 'translate-x-5' : 'translate-x-1'}`} />
+                </div>
+                <span className="text-sm text-slate-300">Commande à crédit</span>
+              </label>
+            </div>
+
+            {/* Articles section */}
+            <div className="p-6 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">
+                  Articles
+                  {cart.length > 0 && (
+                    <span className="ml-2 text-[#137fec] normal-case font-semibold">
+                      ({cart.reduce((s, i) => s + i.quantity, 0)} unités)
+                    </span>
+                  )}
+                </p>
+                <button
+                  onClick={() => setShowPicker(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#137fec]/15 hover:bg-[#137fec]/25 border border-[#137fec]/30 text-[#137fec] rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <span className="text-base leading-none font-bold">+</span>
+                  Ajouter un article
+                </button>
+              </div>
+
+              {cart.length === 0 ? (
+                <div
+                  onClick={() => setShowPicker(true)}
+                  className="border-2 border-dashed border-slate-700 hover:border-[#137fec]/40 rounded-xl p-8 flex flex-col items-center gap-2 cursor-pointer transition-colors group"
+                >
+                  <div className="w-10 h-10 rounded-full bg-slate-800 group-hover:bg-[#137fec]/10 flex items-center justify-center text-xl text-slate-500 group-hover:text-[#137fec] transition-colors font-bold">
+                    +
+                  </div>
+                  <p className="text-sm text-slate-500 group-hover:text-slate-400 transition-colors">
+                    Cliquer pour ajouter des produits
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {cart.map(item => (
+                    <div
+                      key={item.product.id}
+                      className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-900/60 border border-slate-700/70 rounded-xl px-4 py-3"
+                    >
+                      {/* Col 1: Product info + quantity */}
+                      <div className="flex flex-col gap-2 min-w-0">
+                        <div>
+                          <p className="text-sm font-semibold text-white truncate">
+                            {item.product.name}
+                          </p>
+                          <p className="text-xs text-slate-500 font-mono">
+                            {item.product.sku} · {fmt(item.price)}/u
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">Quantité</span>
+                          <div className="flex items-center gap-1 bg-slate-900/80 border border-slate-700 rounded-lg px-1 py-1 shrink-0">
+                            <button
+                              onClick={() => updateQty(item.product.id, item.quantity - 1)}
+                              className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors text-base leading-none"
+                            >
+                              −
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              value={item.quantity}
+                              onChange={e => updateQty(item.product.id, parseInt(e.target.value) || 1)}
+                              className="w-10 text-center bg-transparent text-sm font-bold text-white focus:outline-none"
+                            />
+                            <button
+                              onClick={() => updateQty(item.product.id, item.quantity + 1)}
+                              className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded transition-colors text-base leading-none"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <p className="ml-auto text-sm font-bold text-white">
+                            {fmt(item.price * item.quantity)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Col 2: Size, color, delete */}
+                      <div className="flex flex-col md:items-end gap-2">
+                        <div className="flex w-full md:w-auto flex-row md:flex-col gap-2">
+                          <select
+                            value={item.size ?? ''}
+                            onChange={e => updateItemSize(item.product.id, e.target.value)}
+                            className="flex-1 bg-slate-900/80 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-[#137fec]/60"
+                          >
+                            <option value="">Taille</option>
+                            {ORDER_SIZE_OPTIONS.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                          <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-2 text-[11px] text-slate-400">
+                              <span>Couleur</span>
+                              <input
+                                type="color"
+                                value={item.color ?? '#000000'}
+                                onChange={e => updateItemColor(item.product.id, e.target.value)}
+                                className="w-8 h-6 rounded border border-slate-600 bg-transparent p-0 cursor-pointer"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => removeItem(item.product.id)}
+                          className="self-end text-slate-600 hover:text-rose-400 transition-colors text-base leading-none"
+                          title="Retirer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Total row */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-[#137fec]/5 border border-[#137fec]/20 rounded-xl mt-1">
+                    <span className="text-sm font-bold text-slate-300">Total commande</span>
+                    <span className="text-lg font-black text-white">{fmt(total)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800 shrink-0">
+            <p className="text-xs text-slate-500">
+              {cart.length > 0
+                ? `${cart.length} produit(s) · ${cart.reduce((s, i) => s + i.quantity, 0)} unité(s)`
+                : 'Aucun article ajouté'}
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {saving && (
+                  <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-2" />
+                )}
+                Créer la commande
+              </button>
+            </div>
+            {error && (
+              <p className="mt-2 text-[11px] text-rose-400 text-right">
+                {error}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {showPicker && (
+        <ProductPickerModal
+          products={products}
+          existingIds={cart.map(i => i.product.id)}
+          onAdd={addProduct}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
+    </>
+  );
+};
+
+// ─── Order Detail ─────────────────────────────────────────────────────────────
+
+const OrderDetail: React.FC<{
+  order: Order;
+  onBack: () => void;
+  onStatusChange: (id: number, status: OrderStatus) => void;
+  onDelete: (id: number) => void;
+  onEdit: (order: Order) => void;
+  onNavigate?: (page: string) => void;
+}> = ({ order, onBack, onStatusChange, onDelete, onEdit, onNavigate }) => {
   const [statusOverride, setStatusOverride] = useState(order.status);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const statusOptions: { key: Order['status']; label: string }[] = [
-    { key: 'en_attente', label: 'En Attente' },
-    { key: 'payé', label: 'Payé' },
-    { key: 'en_traitement', label: 'En Traitement' },
-    { key: 'livré', label: 'Livré' },
-    { key: 'annulé', label: 'Annulé' },
-  ];
 
-  const handleStatusChange = (newStatus: Order['status']) => {
-    setStatusOverride(newStatus);
-    onStatusChange(order.id, newStatus);
-  };
+  const payments = Array.isArray(order.payments) ? order.payments : [];
+  const paidAmount = payments.reduce((s, p) => s + p.amount, 0);
+  const remaining = order.total - paidAmount;
 
   return (
     <div className="p-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <button onClick={onBack} className="text-[#137fec] hover:text-blue-400 transition-colors font-medium">
+        <button onClick={onBack} className="text-[#137fec] hover:text-blue-400 font-medium transition-colors">
           Gestion des Commandes
         </button>
-        <span className="material-symbols-outlined text-slate-500 text-base">chevron_right</span>
-        <span className="text-white font-medium">{order.id}</span>
+        <span className="text-slate-500">›</span>
+        <span className="text-white font-medium">CMD-{String(order.id).padStart(3, '0')}</span>
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">Commande {order.id}</h1>
-          <p className="text-slate-400 text-sm mt-1">{order.customer} · {order.date}</p>
+          <h1 className="text-2xl font-black text-white tracking-tight">
+            Commande #{String(order.id).padStart(3, '0')}
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            {order.client.name} · {formatDate(order.createdAt)}
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-sm font-medium hover:bg-slate-800/50 transition-colors">
-            <span className="material-symbols-outlined text-lg">arrow_back</span>
-            Retour à la liste
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-sm font-medium hover:bg-slate-800/50 transition-colors"
+          >
+            ← Retour
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 border border-slate-700 text-slate-300 rounded-lg text-sm font-medium hover:bg-slate-800/50 transition-colors">
-            <span className="material-symbols-outlined text-lg">print</span>
-            Imprimer
+          <button
+            onClick={() => onEdit(order)}
+            className="flex items-center gap-2 px-4 py-2 border border-sky-500/50 text-sky-400 rounded-lg text-sm font-medium hover:bg-sky-500/10 transition-colors"
+          >
+            ✏️ Modifier
           </button>
-          {onDelete && (
-            <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-2 px-4 py-2 border border-rose-500/50 text-rose-400 rounded-lg text-sm font-medium hover:bg-rose-500/10 transition-colors">
-              <span className="material-symbols-outlined text-lg">delete</span>
-              Supprimer
-            </button>
-          )}
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="flex items-center gap-2 px-4 py-2 border border-rose-500/50 text-rose-400 rounded-lg text-sm font-medium hover:bg-rose-500/10 transition-colors"
+          >
+            🗑 Supprimer
+          </button>
         </div>
       </div>
 
-      {showDeleteConfirm && onDelete && (
+      {/* Delete confirm */}
+      {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowDeleteConfirm(false)} />
           <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <h3 className="text-white font-bold text-lg mb-2">Supprimer la commande</h3>
-            <p className="text-slate-400 text-sm mb-4">Êtes-vous sûr de vouloir supprimer {order.id} ?</p>
+            <p className="text-slate-400 text-sm mb-4">
+              Êtes-vous sûr de vouloir supprimer la commande #{order.id} ?
+            </p>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setShowDeleteConfirm(false)} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">Annuler</button>
-              <button onClick={() => { onDelete(order.id); onBack(); }} className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors">Supprimer</button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => { onDelete(order.id); onBack(); }}
+                className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors"
+              >
+                Supprimer
+              </button>
             </div>
           </div>
         </div>
@@ -212,87 +665,208 @@ const OrderDetail: React.FC<{ order: Order; onBack: () => void; onStatusChange: 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Type</p>
-          <TypeBadge type={order.type} />
+          {order.client && (
+            <ClientTypeBadge type={order.client.type} isCredit={order.isCredit} />
+          )}
         </div>
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Statut</p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={statusOverride} />
             <select
               value={statusOverride}
-              onChange={e => handleStatusChange(e.target.value as Order['status'])}
+              onChange={e => {
+                const s = e.target.value as OrderStatus;
+                setStatusOverride(s);
+              }}
               className="bg-slate-800/50 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-300 focus:outline-none focus:border-[#137fec]/50"
             >
-              {statusOptions.map(opt => (
-                <option key={opt.key} value={opt.key}>{opt.label}</option>
-              ))}
+              <option value="PENDING">En Attente</option>
+              <option value="PAID">Payé</option>
+              <option value="DELIVERED">Livré</option>
+              <option value="CANCELLED">Annulé</option>
             </select>
+            <button
+              onClick={() => onStatusChange(order.id, statusOverride)}
+              disabled={statusOverride === order.status}
+              className="px-3 py-1 rounded-lg text-xs font-medium bg-[#137fec] text-white hover:bg-[#1070d4] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Mettre à jour
+            </button>
           </div>
         </div>
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Montant total</p>
-          <p className="text-2xl font-black text-white">GNF {order.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</p>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Total</p>
+          <p className="text-xl font-black text-white">{fmt(order.total)}</p>
         </div>
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Articles</p>
-          <p className="text-2xl font-black text-white">{order.items}</p>
+          <p className="text-xl font-black text-white">
+            {order.items.reduce((s, i) => s + i.quantity, 0)}
+          </p>
         </div>
       </div>
 
-      {/* Customer & shipping (mock) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Client & Payments */}
+      <div className="grid grid-cols-1 md:grid-cols-1 gap-4 items-center justify-center">
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-            <span className="material-symbols-outlined text-[#137fec] text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>person</span>
-            Client
+          <h3 className="text-white font-bold mb-3 flex items-center gap-2">
+            <span className="text-[#137fec]">👤</span> Client
           </h3>
-          <p className="text-sm font-semibold text-white">{order.customer}</p>
-          <p className="text-xs text-slate-400 mt-1">Commande passée le {order.date}</p>
+          <p className="text-sm font-semibold text-white">
+            {order.client?.name ?? 'Client inconnu'}
+          </p>
+          {order.client?.email && (
+            <p className="text-xs text-slate-400 mt-1">{order.client.email}</p>
+          )}
+          {order.client && (
+            <p className="text-xs text-slate-400 mt-1">
+              {order.client.type === 'COMPANY' ? 'Société' : 'Particulier'}
+              {order.client.creditLimit > 0 && ` · Limite crédit : ${fmt(order.client.creditLimit)}`}
+            </p>
+          )}
         </div>
-        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
-          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-            <span className="material-symbols-outlined text-[#137fec] text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>local_shipping</span>
-            Livraison
+        {/* <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+          <h3 className="text-white font-bold mb-3 flex items-center gap-2">
+            <span className="text-[#137fec]">💳</span> Paiements
           </h3>
-          <p className="text-sm text-slate-300">Adresse de livraison associée à cette commande</p>
-          <p className="text-xs text-slate-400 mt-1">Méthode : Standard</p>
-        </div>
+          {payments.length === 0 ? (
+            <p className="text-sm text-slate-400">Aucun paiement enregistré</p>
+          ) : (
+            payments.map(p => (
+              <div key={p.id} className="flex justify-between text-sm mb-1.5">
+                <span className="text-slate-300">
+                  {p.method}{p.reference ? ` · ${p.reference}` : ''}
+                </span>
+                <span className="text-emerald-400 font-semibold">{fmt(p.amount)}</span>
+              </div>
+            ))
+          )}
+          {order.isCredit && remaining > 0 && (
+            <div className="mt-2 pt-2 border-t border-slate-700 flex justify-between text-sm">
+              <span className="text-amber-400">Restant dû</span>
+              <span className="text-amber-400 font-bold">{fmt(remaining)}</span>
+            </div>
+          )}
+        </div> */}
       </div>
 
       {/* Line items */}
       <div className="bg-[#0d1520] border border-slate-800 rounded-xl">
         <div className="px-6 py-4 border-b border-slate-800">
           <h3 className="text-white font-bold">Détail des articles</h3>
-          <p className="text-slate-400 text-xs mt-0.5">{lineItems.length} ligne(s)</p>
+          <p className="text-slate-400 text-xs mt-0.5">{order.items.length} ligne(s)</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Produit</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">SKU</th>
-                <th className="px-6 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wider">Qté</th>
-                <th className="px-6 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wider">Prix unit.</th>
-                <th className="px-6 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wider">Total</th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-left">
+                  Image
+                </th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-left">
+                  Produit
+                </th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-left">
+                  SKU
+                </th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-left">
+                  Taille
+                </th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-left">
+                  Couleur
+                </th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">
+                  Qté
+                </th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">
+                  Prix unit.
+                </th>
+                <th className="px-6 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">
+                  Total
+                </th>
               </tr>
             </thead>
             <tbody>
-              {lineItems.map(line => (
-                <tr key={line.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
-                  <td className="px-6 py-3.5 text-sm font-medium text-white">{line.product}</td>
-                  <td className="px-6 py-3.5 text-sm font-mono text-slate-400">{line.sku}</td>
-                  <td className="px-6 py-3.5 text-sm text-slate-300 text-right">{line.qty}</td>
-                  <td className="px-6 py-3.5 text-sm text-slate-300 text-right">GNF {line.unitPrice.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
-                  <td className="px-6 py-3.5 text-sm font-semibold text-white text-right">GNF {line.total.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
-                </tr>
-              ))}
+              {order.items.map(item => {
+                const product: any = item.product || {};
+                const imageUrl =
+                  product.imageUrl ||
+                  (Array.isArray(product.images) && product.images.length > 0
+                    ? product.images[0].url
+                    : undefined);
+
+                return (
+                  <tr
+                    key={item.id}
+                    className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors cursor-pointer"
+                    onClick={() => {
+                      if (product && product.id) {
+                        try {
+                          window.localStorage.setItem('erp:selectedProductId', String(product.id));
+                        } catch {
+                          // ignore storage errors
+                        }
+                        onNavigate?.('produits');
+                      }
+                    }}
+                  >
+                    <td className="px-6 py-3.5">
+                      <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center">
+                        {imageUrl ? (
+                          <img
+                            src={imageUrl}
+                            alt={product.name || 'Produit'}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="material-symbols-outlined text-slate-500 text-base">
+                            inventory_2
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3.5 text-sm font-medium text-white">
+                      {product.name}
+                    </td>
+                    <td className="px-6 py-3.5 text-sm font-mono text-slate-400">
+                      {product.sku}
+                    </td>
+                    <td className="px-6 py-3.5 text-sm text-slate-300">
+                      {item.size ?? '—'}
+                    </td>
+                    <td className="px-6 py-3.5 text-sm text-slate-300">
+                      {item.color ? (
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-4 h-4 rounded-full border border-white/20"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="text-xs text-slate-400 font-mono">{item.color}</span>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="px-6 py-3.5 text-sm text-slate-300 text-right">
+                      {item.quantity}
+                    </td>
+                    <td className="px-6 py-3.5 text-sm text-slate-300 text-right">
+                      {fmt(item.price)}
+                    </td>
+                    <td className="px-6 py-3.5 text-sm font-semibold text-white text-right">
+                      {fmt(item.price * item.quantity)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
         <div className="px-6 py-4 border-t border-slate-800 flex justify-end">
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-400">Total commande</span>
-            <span className="text-xl font-black text-white">GNF {order.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</span>
+            <span className="text-xl font-black text-white">{fmt(order.total)}</span>
           </div>
         </div>
       </div>
@@ -300,60 +874,173 @@ const OrderDetail: React.FC<{ order: Order; onBack: () => void; onStatusChange: 
   );
 };
 
-const Orders: React.FC = () => {
-  const [orders, setOrders] = useState(initialOrders);
-  const [typeFilter, setTypeFilter] = useState('tous');
-  const [statusFilter, setStatusFilter] = useState('tous');
+// ─── Main Orders Component ────────────────────────────────────────────────────
+
+interface OrdersProps {
+  onNavigate?: (page: string) => void;
+}
+
+const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'INDIVIDUAL' | 'COMPANY' | 'credit'>('all');
   const [search, setSearch] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [deleteConfirmOrder, setDeleteConfirmOrder] = useState<Order | null>(null);
+  const [statusConfirm, setStatusConfirm] = useState<{ id: number; status: OrderStatus } | null>(null);
 
-  const handleCreateOrder = (data: Partial<Order>) => {
-    const id = `CMD-${String(orders.length + 1).padStart(3, '0')}`;
-    setOrders([...orders, {
-      id,
-      customer: data.customer || '',
-      type: data.type || 'détail',
-      status: data.status || 'en_attente',
-      amount: data.amount || 0,
-      date: data.date || new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }),
-      items: data.items || 1,
-    }]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const [apiOrders, apiProducts] = await Promise.all([
+          fetchOrders(),
+          fetchProductsApi(),
+        ]);
+        if (!cancelled) {
+          if (Array.isArray(apiOrders)) {
+            setOrders(apiOrders as any as Order[]);
+          }
+          if (Array.isArray(apiProducts)) {
+            // Map API product type to the simplified Product used in this screen
+            const mapped: Product[] = apiProducts.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              price: p.price,
+              isActive: p.isActive,
+              sizeName: p.sizeName,
+              colorName: p.colorName,
+            }));
+            setProducts(mapped);
+          }
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Erreur lors du chargement des commandes.";
+          setLoadError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleCreate = async (payload: CreateOrderPayload) => {
+    const created = await createOrder(payload);
+    // Append the newly created order from backend to the top of the list
+    setOrders(prev => [created as any as Order, ...prev]);
   };
 
-  const handleStatusChange = (id: string, status: Order['status']) => {
-    setOrders(orders.map(o => o.id === id ? { ...o, status } : o));
+  const handleUpdate = async (id: number, payload: CreateOrderPayload) => {
+    const updated = await updateOrder(id, payload);
+    setOrders(prev =>
+      prev.map(o => (o.id === id ? (updated as any as Order) : o)),
+    );
   };
 
-  const handleDeleteOrder = (id: string) => {
-    setOrders(orders.filter(o => o.id !== id));
+  const applyStatusChange = async (id: number, status: OrderStatus) => {
+    // Optimistic UI update
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    try {
+      if (status === 'CANCELLED') {
+        await cancelOrder(id);
+      } else {
+        await updateOrderStatus(id, status);
+      }
+    } catch (err) {
+      console.error('Failed to update order status', err);
+      // On error, reload orders from API to stay consistent
+      try {
+        const apiOrders = await fetchOrders();
+        if (Array.isArray(apiOrders)) {
+          setOrders(apiOrders as any as Order[]);
+        }
+      } catch {
+        // ignore secondary failure
+      }
+    }
+  };
+
+  const handleStatusChange = (id: number, status: OrderStatus) => {
+    if (status === 'CANCELLED') {
+      setStatusConfirm({ id, status });
+      return;
+    }
+    void applyStatusChange(id, status);
+  };
+
+  const handleDelete = async (id: number) => {
+    const prev = orders;
+    // Optimistic UI: remove locally
+    setOrders(prev.filter(o => o.id !== id));
     setSelectedOrder(null);
     setDeleteConfirmOrder(null);
+    try {
+      await deleteOrder(id);
+    } catch (err) {
+      console.error('Failed to delete order', err);
+      // Revert list on error
+      setOrders(prev);
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Impossible de supprimer la commande.";
+      setLoadError(message);
+    }
   };
 
   const filtered = orders.filter(o => {
-    const matchType = typeFilter === 'tous' || o.type === typeFilter;
-    const matchStatus = statusFilter === 'tous' || o.status === statusFilter;
-    const matchSearch = o.customer.toLowerCase().includes(search.toLowerCase()) || o.id.toLowerCase().includes(search.toLowerCase());
-    return matchType && matchStatus && matchSearch;
+    const matchStatus = statusFilter === 'all' || o.status === statusFilter;
+    const clientType = o.client?.type;
+    const matchType =
+      typeFilter === 'all' ||
+      (typeFilter === 'credit' && o.isCredit) ||
+      (typeFilter !== 'credit' && !o.isCredit && clientType === typeFilter);
+    const clientName = o.client?.name?.toLowerCase() ?? '';
+    const matchSearch =
+      clientName.includes(search.toLowerCase()) ||
+      String(o.id).includes(search);
+    return matchStatus && matchType && matchSearch;
   });
 
-  const totalOrders = orders.length;
-  const pendingOrders = orders.filter(o => o.status === 'en_attente').length;
-  const todayRevenue = orders.filter(o => o.date === '15 Oct 2024').reduce((s, o) => s + o.amount, 0);
-  const inDelivery = orders.filter(o => o.status === 'livré').length;
+  const pendingCount   = orders.filter(o => o.status === 'PENDING').length;
+  const deliveredCount = orders.filter(o => o.status === 'DELIVERED').length;
+  const creditCount    = orders.filter(o => o.isCredit && o.status !== 'CANCELLED').length;
 
-  const currentOrder: Order | null = selectedOrder
-    ? (orders.find(o => o.id === selectedOrder.id) ?? selectedOrder)
+  // Detail view
+  const currentOrder = selectedOrder
+    ? orders.find(o => o.id === selectedOrder.id) ?? selectedOrder
     : null;
+
   if (currentOrder) {
     return (
       <OrderDetail
         order={currentOrder}
         onBack={() => setSelectedOrder(null)}
         onStatusChange={handleStatusChange}
-        onDelete={handleDeleteOrder}
+        onDelete={handleDelete}
+        onEdit={(order) => {
+          setEditingOrder(order);
+          setShowCreateModal(true);
+        }}
+        onNavigate={onNavigate}
       />
     );
   }
@@ -361,36 +1048,44 @@ const Orders: React.FC = () => {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 p-6 space-y-6">
+
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-black text-white tracking-tight">Gestion des Commandes</h1>
-            <p className="text-slate-400 text-sm mt-1">Surveiller et traiter les ventes détail, gros et crédit</p>
+            <p className="text-slate-400 text-sm mt-1">Surveiller et traiter les ventes</p>
           </div>
-          <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors">
-            <span className="material-symbols-outlined text-lg">add</span>
-            Créer une Nouvelle Commande
+        {loadError && (
+          <span className="text-xs text-amber-300">
+            {loadError}
+          </span>
+        )}
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
+          >
+            + Créer une Nouvelle Commande
           </button>
         </div>
 
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Rechercher des commandes..."
-              className="bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-64"
+              placeholder="Rechercher (client, ID)..."
+              className="bg-slate-800/50 border border-slate-700 rounded-lg pl-4 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-64"
             />
           </div>
+          {/* Type filter */}
           <div className="flex items-center gap-1 bg-slate-800/50 border border-slate-700 rounded-lg p-1">
-            {[
-              { key: 'tous', label: 'Tous' },
-              { key: 'détail', label: 'Détail' },
-              { key: 'gros', label: 'Gros' },
-              { key: 'crédit', label: 'Crédit' },
-            ].map(t => (
+            {([
+              { key: 'all',        label: 'Tous'        },
+              { key: 'INDIVIDUAL', label: 'Particulier' },
+              { key: 'COMPANY',    label: 'Société'     },
+              { key: 'credit',     label: 'Crédit'      },
+            ] as const).map(t => (
               <button
                 key={t.key}
                 onClick={() => setTypeFilter(t.key)}
@@ -402,19 +1097,24 @@ const Orders: React.FC = () => {
               </button>
             ))}
           </div>
+          {/* Status filter */}
           <select
             value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
+            onChange={e => setStatusFilter(e.target.value as any)}
             className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-[#137fec]/50"
           >
-            <option value="tous">Tous les Statuts</option>
-            <option value="payé">Payé</option>
-            <option value="en_attente">En Attente</option>
-            <option value="en_traitement">En Traitement</option>
-            <option value="livré">Livré</option>
-            <option value="annulé">Annulé</option>
+            <option value="all">Tous les Statuts</option>
+            <option value="PAID">Payé</option>
+            <option value="PENDING">En Attente</option>
+            <option value="DELIVERED">Livré</option>
+            <option value="CANCELLED">Annulé</option>
           </select>
         </div>
+        {loading && (
+          <span className="text-xs text-slate-500">
+            Chargement des commandes…
+          </span>
+        )}
 
         {/* Table */}
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl">
@@ -422,14 +1122,11 @@ const Orders: React.FC = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-slate-800">
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">ID Commande</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Client</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Type</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Articles</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Montant</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Statut</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Actions</th>
+                  {['ID', 'Client', 'Type', 'Articles', 'Total', 'Date', 'Statut', 'Actions'].map(h => (
+                    <th key={h} className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -439,33 +1136,75 @@ const Orders: React.FC = () => {
                     className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group cursor-pointer"
                     onClick={() => setSelectedOrder(order)}
                   >
-                    <td className="px-6 py-4 text-sm font-mono text-[#137fec]">{order.id}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-white">{order.customer}</td>
-                    <td className="px-6 py-4"><TypeBadge type={order.type} /></td>
-                    <td className="px-6 py-4 text-sm text-slate-400">{order.items} articles</td>
-                    <td className="px-6 py-4 text-sm font-semibold text-white">GNF {order.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
-                    <td className="px-6 py-4 text-sm text-slate-400">{order.date}</td>
+                    <td className="px-6 py-4 text-sm font-mono text-[#137fec]">
+                      #{String(order.id).padStart(3, '0')}
+                    </td>
+                    <td className="px-6 py-4 text-sm font-medium text-white">
+                      <div>{order.client.name}</div>
+                      {order.client.email && (
+                        <div className="text-xs text-slate-500">{order.client.email}</div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <ClientTypeBadge type={order.client.type} isCredit={order.isCredit} />
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-400">
+                      {order.items.reduce((s, i) => s + i.quantity, 0)} unités
+                    </td>
+                    <td className="px-6 py-4 text-sm font-semibold text-white">{fmt(order.total)}</td>
+                    <td className="px-6 py-4 text-sm text-slate-400">{formatDate(order.createdAt)}</td>
                     <td className="px-6 py-4"><StatusBadge status={order.status} /></td>
                     <td className="px-6 py-4" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Inline status update */}
+                        <select
+                          value={order.status}
+                          onChange={e =>
+                            handleStatusChange(order.id, e.target.value as OrderStatus)
+                          }
+                          className="bg-slate-800/50 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-300 focus:outline-none focus:border-[#137fec]/50"
+                          title="Mettre à jour le statut"
+                        >
+                          <option value="PENDING">En Attente</option>
+                          <option value="PAID">Payé</option>
+                          <option value="DELIVERED">Livré</option>
+                          <option value="CANCELLED">Annulé</option>
+                        </select>
+                        <button
+                          onClick={() => {
+                            setEditingOrder(order);
+                            setShowCreateModal(true);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg transition-colors"
+                          title="Modifier"
+                        >
+                          ✏️
+                        </button>
                         <button
                           onClick={() => setSelectedOrder(order)}
                           className="p-1.5 text-slate-400 hover:text-[#137fec] hover:bg-[#137fec]/10 rounded-lg transition-colors"
-                          title="Voir le détail"
+                          title="Voir les détails"
                         >
-                          <span className="material-symbols-outlined text-base">visibility</span>
+                          👁
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setDeleteConfirmOrder(order); }}
+                          onClick={() => setDeleteConfirmOrder(order)}
                           className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
                           title="Supprimer"
                         >
-                          <span className="material-symbols-outlined text-base">delete</span>
+                          🗑
                         </button>
                       </div>
                     </td>
                   </tr>
                 ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500 text-sm">
+                      Aucune commande trouvée
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -473,41 +1212,35 @@ const Orders: React.FC = () => {
       </div>
 
       {/* Stats Footer */}
-      <div className="border-t border-slate-800 bg-[#0d1520] px-6 py-4">
+      <div className="border-t border-slate-800 bg-[#0d1520] px-6 py-4 shrink-0">
         <div className="grid grid-cols-4 gap-4">
           <div className="bg-slate-800/30 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="material-symbols-outlined text-slate-400 text-base" style={{ fontVariationSettings: "'FILL' 1" }}>receipt</span>
-              <span className="text-xs font-medium text-slate-400">Total des Commandes</span>
-            </div>
-            <p className="text-xl font-black text-white">{totalOrders}</p>
+            <p className="text-xs font-medium text-slate-400 mb-1">Total des Commandes</p>
+            <p className="text-xl font-black text-white">{orders.length}</p>
           </div>
           <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="material-symbols-outlined text-amber-400 text-base" style={{ fontVariationSettings: "'FILL' 1" }}>pending</span>
-              <span className="text-xs font-medium text-slate-400">En Attente d'Approbation</span>
-            </div>
-            <p className="text-xl font-black text-amber-400">{pendingOrders}</p>
+            <p className="text-xs font-medium text-slate-400 mb-1">En Attente</p>
+            <p className="text-xl font-black text-amber-400">{pendingCount}</p>
           </div>
-          <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="material-symbols-outlined text-emerald-400 text-base" style={{ fontVariationSettings: "'FILL' 1" }}>payments</span>
-              <span className="text-xs font-medium text-slate-400">Revenu d'Aujourd'hui</span>
-            </div>
-            <p className="text-xl font-black text-emerald-400">GNF {todayRevenue.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</p>
+          <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-xl p-4">
+            <p className="text-xs font-medium text-slate-400 mb-1">Commandes Crédit</p>
+            <p className="text-xl font-black text-cyan-400">{creditCount}</p>
           </div>
-          <div className="bg-[#137fec]/5 border border-[#137fec]/20 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="material-symbols-outlined text-[#137fec] text-base" style={{ fontVariationSettings: "'FILL' 1" }}>local_shipping</span>
-              <span className="text-xs font-medium text-slate-400">En Cours de Livraison</span>
-            </div>
-            <p className="text-xl font-black text-[#137fec]">{inDelivery}</p>
+          <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4">
+            <p className="text-xs font-medium text-slate-400 mb-1">Livrées</p>
+            <p className="text-xl font-black text-blue-400">{deliveredCount}</p>
           </div>
         </div>
       </div>
 
+      {/* Modals */}
       {showCreateModal && (
-        <OrderCreateModal onClose={() => setShowCreateModal(false)} onSave={handleCreateOrder} />
+        <OrderCreateModal
+          onClose={() => setShowCreateModal(false)}
+          onSave={editingOrder ? (payload) => handleUpdate(editingOrder.id, payload) : handleCreate}
+          products={products}
+          initialOrder={editingOrder}
+        />
       )}
 
       {deleteConfirmOrder && (
@@ -515,10 +1248,55 @@ const Orders: React.FC = () => {
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteConfirmOrder(null)} />
           <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <h3 className="text-white font-bold text-lg mb-2">Supprimer la commande</h3>
-            <p className="text-slate-400 text-sm mb-4">Êtes-vous sûr de vouloir supprimer {deleteConfirmOrder.id} ?</p>
+            <p className="text-slate-400 text-sm mb-4">
+              Supprimer la commande #{deleteConfirmOrder.id} ?
+            </p>
             <div className="flex justify-end gap-3">
-              <button onClick={() => setDeleteConfirmOrder(null)} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">Annuler</button>
-              <button onClick={() => handleDeleteOrder(deleteConfirmOrder.id)} className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors">Supprimer</button>
+              <button
+                onClick={() => setDeleteConfirmOrder(null)}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirmOrder.id)}
+                className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium hover:bg-rose-600 transition-colors"
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {statusConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setStatusConfirm(null)}
+          />
+          <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
+            <h3 className="text-white font-bold text-lg mb-2">Annuler la commande</h3>
+            <p className="text-slate-400 text-sm mb-4">
+              Êtes-vous sûr de vouloir annuler la commande #{statusConfirm.id} ?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setStatusConfirm(null)}
+                className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Non
+              </button>
+              <button
+                onClick={async () => {
+                  const { id, status } = statusConfirm;
+                  setStatusConfirm(null);
+                  await applyStatusChange(id, status);
+                }}
+                className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors"
+              >
+                Oui, annuler
+              </button>
             </div>
           </div>
         </div>

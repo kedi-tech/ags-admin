@@ -1,14 +1,29 @@
-import React, { useState } from 'react';
-import { categories as initialCategories, type Category } from '@/data/erp-data';
+import React, { useEffect, useState } from 'react';
+import { type Category } from '@/data/erp-data';
+import { fetchCategories, createCategory, updateCategory, deleteCategory } from '@/api/category';
 
 const ICONS = ['checkroom', 'devices', 'spa', 'sports_soccer', 'kitchen', 'restaurant', 'home', 'local_shipping', 'storefront'];
 
-const CategoryModal: React.FC<{ category?: Category | null; onClose: () => void; onSave: (c: Partial<Category>) => void }> = ({ category, onClose, onSave }) => {
+// Helper to derive product count from API payload (which includes products[])
+const getProductCount = (cat: Category & { products?: unknown }): number => {
+  const anyCat = cat as any;
+  if (Array.isArray(anyCat.products)) {
+    return anyCat.products.length;
+  }
+  return typeof anyCat.productCount === 'number' ? anyCat.productCount : 0;
+};
+
+const CategoryModal: React.FC<{
+  category?: Category | null;
+  onClose: () => void;
+  onSave: (c: Partial<Category>) => Promise<void> | void;
+}> = ({ category, onClose, onSave }) => {
   const [form, setForm] = useState({
     name: category?.name || '',
     description: category?.description || '',
     icon: category?.icon || 'category',
   });
+  const [saving, setSaving] = useState(false);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -56,12 +71,30 @@ const CategoryModal: React.FC<{ category?: Category | null; onClose: () => void;
           </div>
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">Annuler</button>
           <button
-            onClick={() => { onSave(form); onClose(); }}
-            className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {category ? 'Enregistrer' : 'Ajouter la Catégorie'}
+            Annuler
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                setSaving(true);
+                await onSave(form);
+                onClose();
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={saving}
+            className="px-5 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors disabled:opacity-70 disabled:cursor-not-allowed inline-flex items-center gap-2"
+          >
+            {saving && (
+              <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            )}
+            <span>{category ? 'Enregistrer' : 'Ajouter la Catégorie'}</span>
           </button>
         </div>
       </div>
@@ -70,35 +103,77 @@ const CategoryModal: React.FC<{ category?: Category | null; onClose: () => void;
 };
 
 const Categories: React.FC = () => {
-  const [categories, setCategories] = useState(initialCategories);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editCategory, setEditCategory] = useState<Category | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [deletingId, setDeletingId] = useState<string | number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const apiCategories = await fetchCategories();
+        if (!cancelled && Array.isArray(apiCategories)) {
+          setCategories(apiCategories);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : "Erreur lors du chargement des catégories.";
+          setLoadError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filtered = categories.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.description.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleSave = (data: Partial<Category>) => {
+  const handleSave = async (data: Partial<Category>) => {
     if (editCategory) {
-      setCategories(categories.map(c => c.id === editCategory.id ? { ...c, ...data } : c));
+      const updated = await updateCategory(editCategory.id, {
+        name: data.name ?? editCategory.name,
+        description: data.description ?? editCategory.description,
+        icon: data.icon ?? editCategory.icon,
+      });
+      setCategories(categories.map(c => c.id === updated.id ? updated : c));
     } else {
-      setCategories([...categories, {
-        id: `C${String(categories.length + 1).padStart(3, '0')}`,
+      const created = await createCategory({
         name: data.name || '',
         description: data.description || '',
-        productCount: 0,
         icon: data.icon || 'category',
-        createdAt: new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }),
-      }]);
+      });
+      setCategories([...categories, created]);
     }
     setEditCategory(null);
   };
 
-  const totalProducts = categories.reduce((s, c) => s + c.productCount, 0);
-  const avgProducts = (totalProducts / categories.length).toFixed(1);
-  const mostActive = [...categories].sort((a, b) => b.productCount - a.productCount)[0];
+  const totalProducts = categories.reduce((s, c) => s + getProductCount(c), 0);
+  const avgProducts =
+    categories.length > 0
+      ? (totalProducts / categories.length).toFixed(1)
+      : "0.0";
+  const mostActive =
+    categories.length > 0
+      ? [...categories].sort((a, b) => getProductCount(b) - getProductCount(a))[0]
+      : undefined;
 
   return (
     <div className="p-6 space-y-6">
@@ -150,18 +225,30 @@ const Categories: React.FC = () => {
       </div>
 
       {/* Search */}
-      <div className="relative w-80">
-        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Rechercher des catégories..."
-          className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50"
-        />
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative w-80">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Rechercher des catégories..."
+            className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50"
+          />
+        </div>
+        {loading && (
+          <span className="text-xs text-slate-500">
+            Synchronisation avec l&apos;API…
+          </span>
+        )}
       </div>
 
       {/* Table */}
       <div className="bg-[#0d1520] border border-slate-800 rounded-xl overflow-hidden">
+        {loadError && (
+          <div className="px-6 py-2 border-b border-slate-800 text-xs text-amber-300 bg-amber-500/5">
+            {loadError}
+          </div>
+        )}
         <table className="w-full">
           <thead>
             <tr className="border-b border-slate-800">
@@ -187,9 +274,14 @@ const Categories: React.FC = () => {
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
                     <div className="flex-1 max-w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-[#137fec] rounded-full" style={{ width: `${Math.min((cat.productCount / 50) * 100, 100)}%` }} />
+                      <div
+                        className="h-full bg-[#137fec] rounded-full"
+                        style={{ width: `${Math.min((getProductCount(cat) / 50) * 100, 100)}%` }}
+                      />
                     </div>
-                    <span className="text-sm font-semibold text-white">{cat.productCount}</span>
+                    <span className="text-sm font-semibold text-white">
+                      {getProductCount(cat)}
+                    </span>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-400">{cat.createdAt}</td>
@@ -202,10 +294,23 @@ const Categories: React.FC = () => {
                       <span className="material-symbols-outlined text-base">edit</span>
                     </button>
                     <button
-                      onClick={() => setCategories(categories.filter(c => c.id !== cat.id))}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                      onClick={async () => {
+                        try {
+                          setDeletingId(cat.id);
+                          await deleteCategory(cat.id);
+                          setCategories(categories.filter(c => c.id !== cat.id));
+                        } catch (err) {
+                          console.error(err);
+                        } finally {
+                          setDeletingId(null);
+                        }
+                      }}
+                      disabled={deletingId === cat.id}
+                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      <span className="material-symbols-outlined text-base">delete</span>
+                      <span className="material-symbols-outlined text-base">
+                        {deletingId === cat.id ? 'hourglass_top' : 'delete'}
+                      </span>
                     </button>
                   </div>
                 </td>
