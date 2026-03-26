@@ -155,6 +155,14 @@ function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/promo-codes"
+            element={
+              <RequireAuth>
+                <Home />
+              </RequireAuth>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </>

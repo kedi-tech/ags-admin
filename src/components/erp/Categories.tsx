@@ -103,6 +103,7 @@ const CategoryModal: React.FC<{
 };
 
 const Categories: React.FC = () => {
+  const PAGE_SIZE = 6;
   const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -110,6 +111,7 @@ const Categories: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [deletingId, setDeletingId] = useState<string | number | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +147,21 @@ const Categories: React.FC = () => {
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.description.toLowerCase().includes(search.toLowerCase())
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedCategories = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const handleSave = async (data: Partial<Category>) => {
     if (editCategory) {
@@ -176,16 +193,16 @@ const Categories: React.FC = () => {
       : undefined;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">Gestion des Catégories</h1>
           <p className="text-slate-400 text-sm mt-1">Gérer et organiser vos catégories de produits</p>
         </div>
         <button
           onClick={() => { setEditCategory(null); setShowModal(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors w-full sm:w-auto"
         >
           <span className="material-symbols-outlined text-lg">add</span>
           Ajouter une Catégorie
@@ -193,7 +210,7 @@ const Categories: React.FC = () => {
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 bg-[#137fec]/15 rounded-lg">
@@ -212,7 +229,7 @@ const Categories: React.FC = () => {
           </div>
           <p className="text-3xl font-black text-white">{avgProducts}</p>
         </div>
-        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
+        <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5 sm:col-span-2 lg:col-span-1">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 bg-amber-500/15 rounded-lg">
               <span className="material-symbols-outlined text-amber-400 text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
@@ -225,8 +242,8 @@ const Categories: React.FC = () => {
       </div>
 
       {/* Search */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="relative w-80">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="relative w-full sm:w-80">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
           <input
             value={search}
@@ -256,11 +273,12 @@ const Categories: React.FC = () => {
               <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Description</th>
               <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Nombre de Produits</th>
               <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Date de Création</th>
+              <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Ajouté par</th>
               <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(cat => (
+            {paginatedCategories.map(cat => (
               <tr key={cat.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
@@ -285,6 +303,18 @@ const Categories: React.FC = () => {
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-400">{cat.createdAt}</td>
+                <td className="px-6 py-4">
+                  {cat.author ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-[#137fec] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                        {cat.author.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-sm text-slate-300">{cat.author.name}</span>
+                    </div>
+                  ) : (
+                    <span className="text-slate-500 text-sm">—</span>
+                  )}
+                </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
@@ -318,6 +348,27 @@ const Categories: React.FC = () => {
             ))}
           </tbody>
         </table>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {currentPage} sur {totalPages} · {filtered.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
+        </div>
       </div>
 
       {showModal && (

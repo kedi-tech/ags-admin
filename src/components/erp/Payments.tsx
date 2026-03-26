@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { type Payment } from '@/data/erp-data';
 import { fetchPayments as fetchPaymentsApi, createPayment } from '@/api/payments';
 import { fetchOrders } from '@/api/orders';
@@ -48,6 +48,19 @@ const PaymentModal: React.FC<{
     // type: payment?.type || 'CASH',
     amount: payment?.amount?.toString() || '',
   });
+  const [orderSearch, setOrderSearch] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -64,18 +77,74 @@ const PaymentModal: React.FC<{
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
               Commande liée
             </label>
-            <select
-              value={form.orderId}
-              onChange={e => setForm({ ...form, orderId: e.target.value })}
-              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
-            >
-              <option value="">Sélectionner une commande</option>
-              {payableOrders.map((o) => (
-                <option key={o.id} value={o.id}>
-                  CMD-{String(o.id).padStart(3, '0')} · {o.client?.name ?? `Client #${o.clientId}`}
-                </option>
-              ))}
-            </select>
+            <div className="relative" ref={dropdownRef}>
+              <div 
+                className={`flex flex-col bg-slate-800/50 border rounded-lg overflow-hidden transition-colors ${showDropdown ? 'border-[#137fec]/50 ring-1 ring-[#137fec]/20' : 'border-slate-700'}`}
+              >
+                <div className="relative border-b border-slate-700/50">
+                  <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                  <input
+                    type="text"
+                    placeholder="Filtrer par client, ID ou montant..."
+                    value={orderSearch}
+                    onFocus={() => setShowDropdown(true)}
+                    onChange={e => { setOrderSearch(e.target.value); setShowDropdown(true); }}
+                    className="w-full bg-transparent pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none"
+                  />
+                </div>
+                <div 
+                  onClick={() => setShowDropdown(!showDropdown)}
+                  className="px-3 py-2.5 text-sm text-white cursor-pointer flex justify-between items-center hover:bg-slate-700/30 transition-colors"
+                >
+                  <span className={form.orderId ? 'text-white font-medium' : 'text-slate-500'}>
+                    {form.orderId 
+                      ? `CMD-${String(payableOrders.find(o => String(o.id) === form.orderId)?.id).padStart(3, '0')} · ${payableOrders.find(o => String(o.id) === form.orderId)?.client?.name ?? 'Client'}`
+                      : 'Sélectionner une commande'}
+                  </span>
+                  <span className={`material-symbols-outlined text-slate-500 text-sm transition-transform duration-200 ${showDropdown ? 'rotate-180' : ''}`}>
+                    expand_more
+                  </span>
+                </div>
+              </div>
+
+              {showDropdown && (
+                <div className="absolute z-50 w-full mt-1 bg-[#161f2c] border border-slate-700 rounded-xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="p-1">
+                    {payableOrders
+                      .filter(o => 
+                        (o.client?.name ?? '').toLowerCase().includes(orderSearch.toLowerCase()) || 
+                        String(o.id).includes(orderSearch) ||
+                        String(o.total).includes(orderSearch)
+                      )
+                      .length > 0 ? (
+                      payableOrders
+                        .filter(o => 
+                          (o.client?.name ?? '').toLowerCase().includes(orderSearch.toLowerCase()) || 
+                          String(o.id).includes(orderSearch) ||
+                          String(o.total).includes(orderSearch)
+                        )
+                        .map((o) => (
+                          <div 
+                            key={o.id} 
+                            onClick={() => { setForm({ ...form, orderId: String(o.id), customer: o.client?.name || '' }); setShowDropdown(false); }}
+                            className={`px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-all ${form.orderId === String(o.id) ? 'bg-[#137fec] text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                          >
+                            <div className="font-semibold">CMD-{String(o.id).padStart(3, '0')}</div>
+                            <div className={`text-[11px] mt-0.5 ${form.orderId === String(o.id) ? 'text-blue-100' : 'text-slate-500'}`}>
+                              {o.client?.name ?? `Client #${o.clientId}`} · {o.total?.toLocaleString('fr-FR')} GNF
+                            </div>
+                          </div>
+                        ))
+                    ) : (
+                      <div className="px-4 py-6 text-center">
+                        <span className="material-symbols-outlined text-slate-600 text-3xl mb-2">payments</span>
+                        <p className="text-sm text-slate-500 italic">Aucune commande payable trouvée</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
             {payableOrders.length === 0 && (
               <p className="mt-1.5 text-xs text-slate-500">
                 Aucune commande disponible (seules les commandes non annulées et non payées sont affichées).
@@ -199,7 +268,7 @@ const PaymentDetail: React.FC<{
     order?.client?.name ?? payment.customer ?? 'Client inconnu';
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
         <button
@@ -226,6 +295,16 @@ const PaymentDetail: React.FC<{
           <p className="text-slate-400 text-sm mt-1">
             {clientName} · {orderLabel} · {createdAtLabel}
           </p>
+          {payment.author && (
+            <div className="flex items-center gap-2 mt-2">
+              <div className="w-6 h-6 rounded-full bg-[#137fec] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                {payment.author.name.charAt(0).toUpperCase()}
+              </div>
+              <span className="text-xs text-slate-400">
+                Enregistré par <span className="text-slate-200 font-medium">{payment.author.name}</span>
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {payment.type && (
@@ -321,6 +400,7 @@ const PaymentDetail: React.FC<{
 };
 
 const Payments: React.FC = () => {
+  const PAGE_SIZE = 6;
   const [payments, setPayments] = useState<Payment[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [sourceFilter, setSourceFilter] = useState('tous');
@@ -333,6 +413,7 @@ const Payments: React.FC = () => {
   const [loadError, setLoadError] = useState('');
   const [creating, setCreating] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -378,6 +459,7 @@ const Payments: React.FC = () => {
           customer: customerName,
           orderId,
           type: p.type ?? undefined,
+          author: p.author ?? null,
         });
       });
       return result;
@@ -513,6 +595,21 @@ const Payments: React.FC = () => {
 
     return matchMethod && matchSearch;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedPayments = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, methodFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const totalReceived = payments.filter(p => p.status === 'terminé').reduce((s, p) => s + p.amount, 0);
   const retailPayments = payments.filter(p => p.source === 'détail' && p.status === 'terminé').reduce((s, p) => s + p.amount, 0);
@@ -554,9 +651,9 @@ const Payments: React.FC = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">Grand Livre des Paiements</h1>
           <p className="text-slate-400 text-sm mt-1">Suivre et gérer tous les paiements entrants</p>
@@ -587,7 +684,7 @@ const Payments: React.FC = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Total Reçu</p>
           <p className="text-2xl font-black text-emerald-400">GNF {totalReceived.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</p>
@@ -612,13 +709,13 @@ const Payments: React.FC = () => {
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Rechercher des transactions..."
-            className="bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-64"
+            className="bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-full sm:w-64"
           />
         </div>
         <select
@@ -654,7 +751,7 @@ const Payments: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(p => (
+              {paginatedPayments.map(p => (
                 <tr key={p.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group">
                   <td className="px-6 py-3.5 text-sm font-mono text-[#137fec]">
                     {p.id.slice(0, 12)}
@@ -706,6 +803,27 @@ const Payments: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {currentPage} sur {totalPages} · {filtered.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
         </div>
       </div>
 

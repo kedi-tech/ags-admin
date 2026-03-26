@@ -33,3 +33,4 @@ core
 .github/
 
 **/tempobook/**
+write_report.mjs

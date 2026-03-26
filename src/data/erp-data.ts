@@ -36,6 +36,7 @@ export interface Product {
   // Full image objects from backend (for edit/delete)
   images?: { id: string; url: string }[];
   createdAt: string;
+  author?: { id: string; name: string; email: string } | null;
 }
 
 export interface Category {
@@ -45,6 +46,7 @@ export interface Category {
   productCount: number;
   icon: string;
   createdAt: string;
+  author?: { id: string; name: string; email: string } | null;
 }
 
 export interface Order {
@@ -93,6 +95,7 @@ export interface Payment {
   orderId?: string;
   txnId?: string;
   type?: string;
+  author?: { id: string; name: string; email: string } | null;
 }
 
 export interface User {

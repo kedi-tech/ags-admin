@@ -367,10 +367,12 @@ const ProductModal: React.FC<{
                     onClick={() => {
                       if (!colorToAdd) return;
                       if (!form.colorIds.includes(colorToAdd)) {
-                        setForm({ ...form, colorIds: [...form.colorIds, colorToAdd] });
+                        setForm({
+                          ...form,
+                          colorIds: [...form.colorIds, colorToAdd],
+                        });
                       }
                       setColorToAdd('');
-                      style.backgroundColor = colorToAdd;
                     }}
                   >
                     Ajouter
@@ -549,6 +551,7 @@ const ProductDetail: React.FC<{
   product: Product;
   onBack: () => void;
 }> = ({ product, onBack }) => {
+  const [enlargedImageUrl, setEnlargedImageUrl] = useState<string | null>(null);
   const images = product.imageUrls && product.imageUrls.length > 0
     ? product.imageUrls
     : product.imageUrl
@@ -556,7 +559,7 @@ const ProductDetail: React.FC<{
       : [];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <button
         onClick={onBack}
         className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-white transition-colors"
@@ -591,6 +594,16 @@ const ProductDetail: React.FC<{
               year: 'numeric',
             })}
           </div>
+          {product.author && (
+            <div className="flex items-center justify-end gap-2">
+              <div className="w-6 h-6 rounded-full bg-[#137fec] flex items-center justify-center text-white text-[10px] font-bold">
+                {product.author.name.charAt(0).toUpperCase()}
+              </div>
+              <span className="text-xs text-slate-400">
+                Ajouté par <span className="text-slate-200 font-medium">{product.author.name}</span>
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-end gap-3">
             <StockBadge status={getStockStatus(product.stock)} />
             <span className="text-xs text-slate-400">
@@ -709,12 +722,13 @@ const ProductDetail: React.FC<{
                 {images.map((url, idx) => (
                   <div
                     key={url + idx}
-                    className="w-20 h-20 rounded-lg overflow-hidden border border-slate-700 bg-slate-900"
+                    onClick={() => setEnlargedImageUrl(url)}
+                    className="w-20 h-20 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 cursor-zoom-in hover:border-[#137fec]/50 transition-colors group"
                   >
                     <img
                       src={url}
                       alt={`Image ${idx + 1}`}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                     />
                   </div>
                 ))}
@@ -723,11 +737,34 @@ const ProductDetail: React.FC<{
           </div>
         </div>
       </div>
+      {/* Lightbox / Enlarged Image Overlay */}
+      {enlargedImageUrl && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-300"
+          onClick={() => setEnlargedImageUrl(null)}
+        >
+          <button 
+            className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors"
+            onClick={(e) => { e.stopPropagation(); setEnlargedImageUrl(null); }}
+          >
+            <span className="material-symbols-outlined text-3xl">close</span>
+          </button>
+          <div className="max-w-[90vw] max-h-[90vh] relative animate-in zoom-in-95 duration-300">
+            <img 
+              src={enlargedImageUrl} 
+              alt="Product Enlarged" 
+              className="w-full h-full object-contain rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 const Products: React.FC = () => {
+  const PAGE_SIZE = 6;
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -744,6 +781,7 @@ const Products: React.FC = () => {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -840,6 +878,21 @@ const Products: React.FC = () => {
       p.sku.toLowerCase().includes(search.toLowerCase());
     return matchCat && matchSubCat && matchSearch;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedProducts = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, activeCategory, activeSubCategory]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const handleSave = async (data: Partial<Product>, files: File[], deleteImageIds: string[]) => {
     if (editProduct) {
@@ -948,7 +1001,7 @@ const Products: React.FC = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1051,7 +1104,7 @@ const Products: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => (
+              {paginatedProducts.map((p) => (
                 <tr key={p.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -1119,7 +1172,7 @@ const Products: React.FC = () => {
                         }}
                         className="sr-only peer"
                       />
-                      <div className="w-9 h-5 bg-slate-700 peer-checked:bg-[#137fec] rounded-full peer peer-focus:outline-none transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
+                      <div className="w-9 h-5 bg-slate-700 peer-checked:bg-[#137fec] rounded-full peer peer-focus:outline-none transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-[#0d1520] after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
                       <span className="ml-2 text-xs text-slate-400 flex items-center gap-1">
                         {p.isActive ? 'Actif' : 'Inactif'}
                         {togglingId === p.id && (
@@ -1171,11 +1224,27 @@ const Products: React.FC = () => {
         </div>
         {/* Pagination */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800">
-          <p className="text-sm text-slate-400">Affichage {filtered.length} sur {products.length} produits</p>
+          <p className="text-sm text-slate-400">
+            Page {currentPage} sur {totalPages} · {filtered.length} résultats
+          </p>
           <div className="flex items-center gap-2">
-            <button className="px-3 py-1.5 border border-slate-700 text-slate-400 rounded-lg text-sm hover:bg-slate-800/50 transition-colors">Précédent</button>
-            <button className="px-3 py-1.5 bg-[#137fec] text-white rounded-lg text-sm">1</button>
-            <button className="px-3 py-1.5 border border-slate-700 text-slate-400 rounded-lg text-sm hover:bg-slate-800/50 transition-colors">Suivant</button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 border border-slate-700 text-slate-400 rounded-lg text-sm hover:bg-slate-800/50 transition-colors disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button className="px-3 py-1.5 bg-[#137fec] text-white rounded-lg text-sm">
+              {currentPage}
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 border border-slate-700 text-slate-400 rounded-lg text-sm hover:bg-slate-800/50 transition-colors disabled:opacity-50"
+            >
+              Suivant
+            </button>
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { stockAdjustments as initialAdjustments, products, type StockAdjustment } from '@/data/erp-data';
 
 const TypeBadge: React.FC<{ type: string }> = ({ type }) => {
@@ -22,7 +22,9 @@ const AdjustmentModal: React.FC<{ onClose: () => void; onSave: (adj: Partial<Sto
   const product = products.find(p => p.id === selectedProduct);
   const qtyNum = parseInt(qty) || 0;
   const isPositive = adjType === 'addition' || adjType === 'retour';
-  const newStock = product ? product.quantity + (isPositive ? qtyNum : -qtyNum) : 0;
+  const newStock = product
+    ? product.stock + (isPositive ? qtyNum : -qtyNum)
+    : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -47,7 +49,9 @@ const AdjustmentModal: React.FC<{ onClose: () => void; onSave: (adj: Partial<Sto
             >
               <option value="">Sélectionner un produit</option>
               {products.map(p => (
-                <option key={p.id} value={p.id}>{p.name} ({p.sku}) — Stock: {p.quantity}</option>
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.sku}) — Stock: {p.stock}
+                </option>
               ))}
             </select>
           </div>
@@ -114,7 +118,7 @@ const AdjustmentModal: React.FC<{ onClose: () => void; onSave: (adj: Partial<Sto
                   sku: product.sku,
                   type: adjType as StockAdjustment['type'],
                   qtyAdjusted: isPositive ? qtyNum : -qtyNum,
-                  prevStock: product.quantity,
+                  prevStock: product.stock,
                   newStock: Math.max(newStock, 0),
                   adminUser: 'Alexandre Dubois',
                   dateTime: new Date().toLocaleString('fr-FR'),
@@ -133,11 +137,13 @@ const AdjustmentModal: React.FC<{ onClose: () => void; onSave: (adj: Partial<Sto
 };
 
 const StockLog: React.FC = () => {
+  const PAGE_SIZE = 6;
   const [adjustments, setAdjustments] = useState(initialAdjustments);
   const [typeFilter, setTypeFilter] = useState('tous');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<StockAdjustment | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const filtered = adjustments.filter(a => {
     const matchType = typeFilter === 'tous' || a.type === typeFilter;
@@ -147,6 +153,21 @@ const StockLog: React.FC = () => {
       a.adminUser.toLowerCase().includes(search.toLowerCase());
     return matchType && matchSearch;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedAdjustments = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, typeFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const handleSave = (data: Partial<StockAdjustment>) => {
     setAdjustments([{
@@ -163,7 +184,7 @@ const StockLog: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Breadcrumb + Header */}
       <div>
         <div className="flex items-center gap-2 text-sm mb-3">
@@ -240,7 +261,7 @@ const StockLog: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(adj => (
+              {paginatedAdjustments.map(adj => (
                 <tr key={adj.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group">
                   <td className="px-6 py-3.5 text-sm text-slate-400">{adj.dateTime}</td>
                   <td className="px-6 py-3.5 text-sm font-semibold text-white">{adj.product}</td>
@@ -272,6 +293,27 @@ const StockLog: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {currentPage} sur {totalPages} · {filtered.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
         </div>
       </div>
 

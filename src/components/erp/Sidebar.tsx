@@ -4,6 +4,8 @@ import { AuthUser } from '@/api/auth';
 interface SidebarProps {
   currentPage: string;
   onNavigate: (page: string) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 const navItems = [
@@ -18,10 +20,16 @@ const navItems = [
   { id: 'paiements', label: 'Paiements', icon: 'payments' },
   { id: 'utilisateurs', label: 'Utilisateurs (Admin)', icon: 'group' },
   { id: 'rapports', label: 'Rapports', icon: 'bar_chart' },
+  { id: 'promo-codes', label: 'Codes Promo', icon: 'local_offer' },
   // { id: 'stock', label: 'Ajustements Stock', icon: 'tune' },
 ];
 
-const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => {
+const Sidebar: React.FC<SidebarProps> = ({
+  currentPage,
+  onNavigate,
+  isOpen = false,
+  onClose,
+}) => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("");
@@ -38,11 +46,22 @@ const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => {
     load();
   }, []);
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-[#0d1520] border-r border-slate-800 flex flex-col z-40">
+    <>
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={onClose}
+        />
+      )}
+      <aside
+        className={`fixed left-0 top-0 h-screen w-64 bg-[#0d1520] border-r border-slate-800 flex flex-col z-50 transform transition-transform duration-200 lg:translate-x-0 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
       {/* Logo */}
       <div className="px-6 py-5 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg overflow-hidden bg-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center ">
+          <div className="w-64 h-32 rounded-lg overflow-hidden  flex items-center justify-center">
             <img
               src="/ags_logo.png"
               alt="Alliance Solution Group"
@@ -65,7 +84,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => {
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id)}
+              onClick={() => {
+                onNavigate(item.id);
+                onClose?.();
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
                 isActive
                   ? 'bg-[#137fec]/15 text-[#137fec]'
@@ -102,7 +124,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => {
           </button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 };
 

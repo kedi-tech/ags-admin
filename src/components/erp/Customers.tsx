@@ -11,9 +11,9 @@ import {
 type ClientType = 'INDIVIDUAL' | 'COMPANY';
 
 interface OrderFromApi {
-  id: number;
+  id: string;
   client: {
-    id: number;
+    id: string;
     type: ClientType;
     name: string;
     email?: string | null;
@@ -24,7 +24,7 @@ interface OrderFromApi {
 }
 
 interface CustomerSummary {
-  id: number;
+  id: string;
   name: string;
   email?: string | null;
   type: ClientType;
@@ -32,6 +32,7 @@ interface CustomerSummary {
   totalOrders: number;
   totalAmount: number;
   hasCreditOrders: boolean;
+  phone?: string | null;
 }
 
 const TypeBadge: React.FC<{ type: ClientType }> = ({ type }) => {
@@ -54,6 +55,7 @@ interface CustomersProps {
 }
 
 const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
+  const PAGE_SIZE = 6;
   const [clients, setClients] = useState<ApiClient[]>([]);
   const [orders, setOrders] = useState<OrderFromApi[]>([]);
   const [loading, setLoading] = useState(false);
@@ -64,6 +66,8 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [detailPage, setDetailPage] = useState(1);
 
   const [editingClient, setEditingClient] = useState<ApiClient | null>(null);
   const [deleteClientTarget, setDeleteClientTarget] = useState<ApiClient | null>(null);
@@ -74,6 +78,12 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
   const [newPhone, setNewPhone] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newAddress, setNewAddress] = useState('');
+  const [newCreditLimit, setNewCreditLimit] = useState<number | ''>(0);
+
+  const normalizeText = (value?: string | null) =>
+    (value ?? '').toLowerCase().trim();
+  const normalizePhone = (value?: string | null) =>
+    (value ?? '').replace(/\D/g, '');
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +136,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
       const hasCreditOrders = clientOrders.some((o) => o.isCredit);
 
       return {
+        phone: c.phone ?? null,
         id: c.id,
         name: c.name,
         email: c.email ?? undefined,
@@ -140,12 +151,39 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
 
   const filtered = customers.filter((c) => {
     const matchType = typeFilter === 'all' || c.type === typeFilter;
-    const query = search.toLowerCase();
+    const query = normalizeText(search);
+    const phoneQuery = normalizePhone(search);
+    const normalizedName = normalizeText(c.name);
+    const normalizedEmail = normalizeText(c.email);
+    const normalizedPhoneText = normalizeText(c.phone);
+    const normalizedPhoneDigits = normalizePhone(c.phone);
+
+    if (!query) {
+      return matchType;
+    }
+
     const matchSearch =
-      c.name.toLowerCase().includes(query) ||
-      (c.email ? c.email.toLowerCase().includes(query) : false);
+      normalizedName.includes(query) ||
+      normalizedEmail.includes(query) ||
+      normalizedPhoneText.includes(query) ||
+      (phoneQuery.length > 0 && normalizedPhoneDigits.includes(phoneQuery));
     return matchType && matchSearch;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedCustomers = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, typeFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const totalCreditCustomers = customers.filter((c) => c.hasCreditOrders).length;
   const totalCreditExposure = customers.reduce(
@@ -156,6 +194,18 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
   const customerOrders = selectedCustomer
     ? orders.filter(o => o.client && o.client.id === selectedCustomer.id)
     : [];
+  const customerOrdersTotalPages = Math.max(
+    1,
+    Math.ceil(customerOrders.length / PAGE_SIZE),
+  );
+  const paginatedCustomerOrders = customerOrders.slice(
+    (detailPage - 1) * PAGE_SIZE,
+    detailPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setDetailPage(1);
+  }, [selectedCustomer?.id]);
 
   const resetCreateForm = () => {
     setNewName('');
@@ -163,6 +213,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
     setNewPhone('');
     setNewEmail('');
     setNewAddress('');
+    setNewCreditLimit(0);
     setEditingClient(null);
   };
 
@@ -182,6 +233,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
           email: newEmail.trim() || undefined,
           phone: newPhone.trim() || undefined,
           address: newAddress.trim() || undefined,
+          creditLimit: Number(newCreditLimit) || 0,
         });
         setClients(prev =>
           prev.map(c => (c.id === updated.id ? updated : c)),
@@ -193,6 +245,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
           email: newEmail.trim() || undefined,
           phone: newPhone.trim() || undefined,
           address: newAddress.trim() || undefined,
+          creditLimit: Number(newCreditLimit) || 0,
         });
         setClients((prev) => [...prev, created]);
       }
@@ -211,7 +264,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
 
   if (selectedCustomer) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm">
           <button
@@ -307,7 +360,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
                 </tr>
               </thead>
               <tbody>
-                {customerOrders.map((o) => (
+                {paginatedCustomerOrders.map((o) => (
                   <tr
                     key={o.id}
                     className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors cursor-pointer"
@@ -320,9 +373,9 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
                       onNavigate?.('commandes');
                     }}
                   >
-                    <td className="px-6 py-3.5 text-sm font-mono text-[#137fec]">
-                      #{String(o.id).padStart(3, '0')}
-                    </td>
+                  <td className="px-6 py-3.5 text-sm font-mono text-[#137fec]">
+                    #{String(o.id).padStart(3, '0')}
+                  </td>
                     <td className="px-6 py-3.5 text-sm font-semibold text-white">
                       GNF {o.total.toLocaleString('fr-FR')}
                     </td>
@@ -353,8 +406,20 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
                       {(o as any).status ?? ''}
                     </td>
                     <td className="px-6 py-3.5 text-sm text-slate-300">
-                      <button className="p-1.5 text-slate-400 hover:text-[#137fec] hover:bg-[#137fec]/10 rounded-lg transition-colors" title="Voir les détails">
-                        <span className="material-symbols-outlined text-base" onClick={() => setSelectedOrder(o)}>visibility</span>
+                      <button
+                        className="p-1.5 text-slate-400 hover:text-[#137fec] hover:bg-[#137fec]/10 rounded-lg transition-colors"
+                        title="Voir les détails"
+                        onClick={() => {
+                          localStorage.setItem(
+                            'erp:selectedOrderId',
+                            String(o.id),
+                          );
+                          onNavigate?.('commandes');
+                        }}
+                      >
+                        <span className="material-symbols-outlined text-base">
+                          visibility
+                        </span>
                       </button>
                     </td>
                   </tr>
@@ -372,15 +437,38 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
               </tbody>
             </table>
           </div>
+          <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              Page {detailPage} sur {customerOrdersTotalPages} · {customerOrders.length} résultats
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setDetailPage((p) => Math.max(1, p - 1))}
+                disabled={detailPage === 1}
+                className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+              >
+                Précédent
+              </button>
+              <button
+                onClick={() =>
+                  setDetailPage((p) => Math.min(customerOrdersTotalPages, p + 1))
+                }
+                disabled={detailPage === customerOrdersTotalPages}
+                className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+              >
+                Suivant
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">
             Gestion des Clients
@@ -419,7 +507,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
             Clients totaux
@@ -448,18 +536,18 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">
             search
           </span>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher par nom ou email..."
-            className="bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-72"
+            placeholder="Rechercher par nom, email ou téléphone..."
+            className="bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-full sm:w-72"
           />
         </div>
-        <div className="flex items-center gap-1 bg-slate-800/50 border border-slate-700 rounded-lg p-1">
+        <div className="flex items-center gap-1 bg-slate-800/50 border border-slate-700 rounded-lg p-1 w-full sm:w-auto overflow-x-auto">
           {[
             { key: 'all', label: 'Tous' },
             { key: 'INDIVIDUAL', label: 'Particuliers' },
@@ -487,7 +575,81 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
             Affichage {filtered.length} sur {customers.length} clients
           </p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="md:hidden p-4 space-y-3">
+          {paginatedCustomers.map((c) => (
+            <div
+              key={c.id}
+              className="border border-slate-800 rounded-xl p-4 bg-slate-900/30"
+              onClick={() => setSelectedCustomer(c)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-white">{c.name}</div>
+                  {c.email && (
+                    <div className="text-xs text-slate-400 mt-1">{c.email}</div>
+                  )}
+                  {c.phone && (
+                    <div className="text-xs text-slate-400">{c.phone}</div>
+                  )}
+                </div>
+                <TypeBadge type={c.type} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-3 text-xs">
+                <div className="text-slate-400">
+                  Commandes: <span className="text-slate-200">{c.totalOrders}</span>
+                </div>
+                <div className="text-slate-400">
+                  Crédit actif:{' '}
+                  <span className={c.hasCreditOrders ? 'text-cyan-400' : 'text-slate-300'}>
+                    {c.hasCreditOrders ? 'Oui' : 'Non'}
+                  </span>
+                </div>
+                <div className="text-slate-400 col-span-2">
+                  Total: <span className="text-white">GNF {c.totalAmount.toLocaleString('fr-FR')}</span>
+                </div>
+              </div>
+              <div
+                className="flex items-center gap-2 mt-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => {
+                    const base = clients.find(cl => cl.id === String(c.id));
+                    if (!base) return;
+                    setEditingClient(base);
+                    setNewName(base.name);
+                    setNewType(base.type as ClientType);
+                    setNewEmail(base.email ?? '');
+                    setNewPhone((base as any).phone ?? '');
+                    setNewAddress((base as any).address ?? '');
+                    setNewCreditLimit(base.creditLimit ?? 0);
+                    setCreateError('');
+                    setShowCreateModal(true);
+                  }}
+                  className="px-2.5 py-1.5 text-xs text-slate-300 bg-slate-800 rounded-md hover:bg-slate-700 transition-colors"
+                >
+                  Modifier
+                </button>
+                <button
+                  onClick={() => {
+                    const base = clients.find(cl => cl.id === String(c.id));
+                    if (!base) return;
+                    setDeleteClientTarget(base);
+                  }}
+                  className="px-2.5 py-1.5 text-xs text-rose-300 bg-rose-500/10 rounded-md hover:bg-rose-500/20 transition-colors"
+                >
+                  Supprimer
+                </button>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <div className="text-center text-sm text-slate-500 py-6">
+              Aucun client trouvé. Ajoutez un client pour commencer.
+            </div>
+          )}
+        </div>
+        <div className="overflow-x-auto hidden md:block">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
@@ -515,7 +677,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
+              {paginatedCustomers.map((c) => (
                 <tr
                   key={c.id}
                   className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors cursor-pointer"
@@ -525,6 +687,9 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
                     <div className="font-semibold">{c.name}</div>
                     {c.email && (
                       <div className="text-xs text-slate-400">{c.email}</div>
+                    )}
+                    {c.phone && (
+                      <div className="text-xs text-slate-400">{c.phone}</div>
                     )}
                   </td>
                   <td className="px-6 py-4">
@@ -562,6 +727,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
                           setNewEmail(base.email ?? '');
                           setNewPhone((base as any).phone ?? '');
                           setNewAddress((base as any).address ?? '');
+                          setNewCreditLimit(base.creditLimit ?? 0);
                           setCreateError('');
                           setShowCreateModal(true);
                         }}
@@ -597,6 +763,27 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {currentPage} sur {totalPages} · {filtered.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
         </div>
       </div>
       {showCreateModal && (
@@ -682,6 +869,20 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
                     disabled={creating}
                   />
                 </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">
+                  Limite de crédit (GNF)
+                </label>
+                <input
+                  type="number"
+                  value={newCreditLimit}
+                  onChange={(e) => setNewCreditLimit(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full bg-slate-900/80 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#137fec] focus:border-[#137fec]"
+                  placeholder="0"
+                  disabled={creating}
+                  min={0}
+                />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-300">

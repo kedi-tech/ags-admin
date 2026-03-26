@@ -129,6 +129,7 @@ const SubCategoryModal: React.FC<{
 };
 
 const SubCategoriesPage: React.FC = () => {
+  const PAGE_SIZE = 6;
   const [categories, setCategories] = useState<Category[]>([]);
   const [subCategories, setSubCategories] = useState<SubCategory[]>([]);
   const [productCounts, setProductCounts] = useState<Record<string, number>>(
@@ -142,6 +143,7 @@ const SubCategoriesPage: React.FC = () => {
   const [editing, setEditing] = useState<SubCategory | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SubCategory | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -209,10 +211,25 @@ const SubCategoriesPage: React.FC = () => {
     const parentMatch = parentName.toLowerCase().includes(query);
     return catMatch && (nameMatch || parentMatch);
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedSubCategories = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, selectedCategoryFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">
             Sous-catégories
@@ -226,19 +243,19 @@ const SubCategoriesPage: React.FC = () => {
             setEditing(null);
             setShowModal(true);
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors w-full sm:w-auto"
         >
           <span className="material-symbols-outlined text-lg">add</span>
           Nouvelle sous-catégorie
         </button>
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 w-full sm:w-auto">
           <select
             value={selectedCategoryFilter}
             onChange={e => setSelectedCategoryFilter(e.target.value)}
-            className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-[#137fec]/50"
+            className="w-full sm:w-auto bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-[#137fec]/50"
           >
             <option value="toutes">Toutes les catégories</option>
             {categories.map(c => (
@@ -248,7 +265,7 @@ const SubCategoriesPage: React.FC = () => {
             ))}
           </select>
         </div>
-        <div className="relative">
+        <div className="relative w-full sm:w-72">
           <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">
             search
           </span>
@@ -256,7 +273,7 @@ const SubCategoriesPage: React.FC = () => {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Rechercher une sous-catégorie..."
-            className="bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50 w-72"
+            className="w-full bg-slate-800/50 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-[#137fec]/50"
           />
         </div>
       </div>
@@ -302,7 +319,7 @@ const SubCategoriesPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(sc => {
+              {paginatedSubCategories.map(sc => {
                 const parent = categories.find(c => c.id === sc.categoryId);
                 return (
                   <tr
@@ -363,6 +380,27 @@ const SubCategoriesPage: React.FC = () => {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {currentPage} sur {totalPages} · {filtered.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
         </div>
       </div>
 

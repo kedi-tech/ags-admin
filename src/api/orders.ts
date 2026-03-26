@@ -1,7 +1,35 @@
 const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.126:5000";
+  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.137:5000";
 
-export async function fetchOrders(): Promise<any[]> {
+export interface OrderClient {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+}
+
+export interface OrderItem {
+  productId: string | number;
+  quantity: number;
+  size?: string | null;
+  color?: string | null;
+}
+
+export interface ApiOrder {
+  id: string;
+  clientId?: string;
+  client?: OrderClient | null;
+  total?: number;
+  status?: string;
+  isCredit?: boolean;
+  items?: OrderItem[];
+  createdAt?: string;
+  updatedAt?: string;
+  author?: { id: string; name: string; email: string } | null;
+}
+
+export async function fetchOrders(): Promise<ApiOrder[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/orders`, {
     method: "GET",
     headers: {
@@ -25,12 +53,12 @@ export async function fetchOrders(): Promise<any[]> {
   }
 
   // Assume backend already returns objects compatible with our Orders UI
-  return (data as any[]) || [];
+  return (data as ApiOrder[]) || [];
 }
 
 export async function fetchOrderById(
   id: string | number,
-): Promise<any> {
+): Promise<ApiOrder> {
   const res = await fetch(`${API_BASE_URL}/api/v1/orders/${id}`, {
     method: "GET",
     headers: {
@@ -53,12 +81,13 @@ export async function fetchOrderById(
     throw new Error(message);
   }
 
-  return data as any;
+  return data as ApiOrder;
 }
 
 export interface CreateOrderPayload {
   // Must match Prisma Client.id which is a string/UUID
   clientId: string;
+  status: string;
   // Whether this order is a credit order
   isCredit?: boolean;
   items: {
@@ -72,7 +101,7 @@ export interface CreateOrderPayload {
 // Reuse same shape for updates for now
 export type UpdateOrderPayload = CreateOrderPayload;
 
-export async function createOrder(payload: CreateOrderPayload): Promise<any> {
+export async function createOrder(payload: CreateOrderPayload): Promise<ApiOrder> {
   const res = await fetch(`${API_BASE_URL}/api/v1/orders`, {
     method: "POST",
     headers: {
@@ -95,13 +124,13 @@ export async function createOrder(payload: CreateOrderPayload): Promise<any> {
     throw new Error(message);
   }
 
-  return data as any;
+  return data as ApiOrder;
 }
 
 export async function updateOrder(
   id: string | number,
   payload: UpdateOrderPayload,
-): Promise<any> {
+): Promise<ApiOrder> {
   const res = await fetch(`${API_BASE_URL}/api/v1/orders/${id}`, {
     method: "PUT",
     headers: {
@@ -124,11 +153,11 @@ export async function updateOrder(
     throw new Error(message);
   }
 
-  return data as any;
+  return data as ApiOrder;
 }
 
 export async function updateOrderStatus(
-  id: number,
+  id: string | number,
   status: string,
 ): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/v1/orders/${id}/status`, {
@@ -154,7 +183,7 @@ export async function updateOrderStatus(
   }
 }
 
-export async function cancelOrder(id: number): Promise<void> {
+export async function cancelOrder(id: string | number): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/v1/orders/${id}/cancel`, {
     method: "PUT",
     headers: {
@@ -176,7 +205,7 @@ export async function cancelOrder(id: number): Promise<void> {
   }
 }
 
-export async function deleteOrder(id: number): Promise<void> {
+export async function deleteOrder(id: string | number): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/v1/orders/${id}`, {
     method: "DELETE",
     headers: {

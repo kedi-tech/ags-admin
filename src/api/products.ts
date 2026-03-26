@@ -1,7 +1,7 @@
 import type { Product } from "@/data/erp-data";
 
 const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.126:5000";
+  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.137:5000";
 
 type ApiProduct = {
   id: string;
@@ -36,6 +36,7 @@ type ApiProduct = {
   color?: string | null;
   images?: { id: string; url: string }[];
   createdAt: string;
+  author?: { id: string; name: string; email: string } | null;
 };
 
 const mapProduct = (p: ApiProduct): Product => ({
@@ -60,6 +61,7 @@ const mapProduct = (p: ApiProduct): Product => ({
   imageUrls: p.images ? p.images.map(img => img.url) : undefined,
   images: p.images,
   createdAt: p.createdAt,
+  author: p.author ?? null,
 });
 
 export interface CreateProductPayload {
@@ -217,7 +219,7 @@ export async function createProductWithImages(
   let data: unknown = null;
   try {
     data = await res.json();
-    
+
   } catch {
     // ignore parse error
   }

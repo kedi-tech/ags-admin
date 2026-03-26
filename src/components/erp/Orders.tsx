@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { fetchOrders, createOrder, updateOrder, updateOrderStatus, cancelOrder, deleteOrder, type CreateOrderPayload } from '@/api/orders';
 import { fetchProducts as fetchProductsApi } from '@/api/products';
 import { fetchClients, type Client as ApiClient } from '@/api/clients';
@@ -13,6 +13,7 @@ interface Client {
   type: ClientType;
   name: string;
   email?: string;
+  phone?: string;
   creditLimit: number;
 }
 
@@ -57,6 +58,7 @@ interface Order {
   createdAt: string;
   items: OrderItem[];
   payments: Payment[];
+  author?: { id: string; name: string; email: string } | null;
 }
 
 interface CartItem {
@@ -214,6 +216,19 @@ const OrderCreateModal: React.FC<{
   const [clients, setClients] = useState<ApiClient[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [clientSearch, setClientSearch] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,8 +251,8 @@ const OrderCreateModal: React.FC<{
     if (!initialOrder) return;
     // Preselect client
     setSelectedClientId(String(initialOrder.clientId));
-    // Prefill credit toggle
-    setForm(prev => ({ ...prev, isCredit: initialOrder.isCredit }));
+    // Prefill credit toggle and status
+    setForm(prev => ({ ...prev, isCredit: initialOrder.isCredit, status: initialOrder.status }));
     // Prefill cart from existing items
     if (Array.isArray(initialOrder.items) && initialOrder.items.length > 0) {
       const mapped: CartItem[] = initialOrder.items.map((it) => ({
@@ -312,7 +327,7 @@ const OrderCreateModal: React.FC<{
 
     try {
       setSaving(true);
-      await onSave({ clientId, isCredit: form.isCredit, items });
+      await onSave({ clientId, isCredit: form.isCredit, items, status: form.status });
       onClose();
     } catch (err: unknown) {
       const message =
@@ -341,21 +356,72 @@ const OrderCreateModal: React.FC<{
             {/* Client section */}
             <div className="p-6 space-y-4 border-b border-slate-800/60">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Informations client</p>
-              <div>
+              <div className="relative" ref={dropdownRef}>
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Client</label>
-                <select
-                  value={selectedClientId}
-                  onChange={e => setSelectedClientId(e.target.value)}
-                  disabled={loadingClients}
-                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
+                <div 
+                  className={`flex flex-col bg-slate-800/50 border rounded-lg overflow-hidden transition-colors ${showDropdown ? 'border-[#137fec]/50 ring-1 ring-[#137fec]/20' : 'border-slate-700'}`}
                 >
-                  <option value="">— Choisir un client —</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.email ?? '—'})
-                    </option>
-                  ))}
-                </select>
+                  <div className="relative border-b border-slate-700/50">
+                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                    <input
+                      type="text"
+                      placeholder="Filtrer par nom, email ou téléphone..."
+                      value={clientSearch}
+                      onFocus={() => setShowDropdown(true)}
+                      onChange={e => { setClientSearch(e.target.value); setShowDropdown(true); }}
+                      className="w-full bg-transparent pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none"
+                    />
+                  </div>
+                  <div 
+                    onClick={() => setShowDropdown(!showDropdown)}
+                    className="px-3 py-2.5 text-sm text-white cursor-pointer flex justify-between items-center hover:bg-slate-700/30 transition-colors"
+                  >
+                    <span className={selectedClientId ? 'text-white font-medium' : 'text-slate-500'}>
+                      {selectedClientId 
+                        ? clients.find(c => String(c.id) === selectedClientId)?.name 
+                        : 'Sélectionner un client'}
+                    </span>
+                    <span className={`material-symbols-outlined text-slate-500 text-sm transition-transform duration-200 ${showDropdown ? 'rotate-180' : ''}`}>
+                      expand_more
+                    </span>
+                  </div>
+                </div>
+
+                {showDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-[#161f2c] border border-slate-700 rounded-xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="p-1">
+                      {clients
+                        .filter(c => 
+                          c.name.toLowerCase().includes(clientSearch.toLowerCase()) || 
+                          (c.email && c.email.toLowerCase().includes(clientSearch.toLowerCase())) ||
+                          (c.phone && c.phone.includes(clientSearch))
+                        )
+                        .length > 0 ? (
+                        clients
+                          .filter(c => 
+                            c.name.toLowerCase().includes(clientSearch.toLowerCase()) || 
+                            (c.email && c.email.toLowerCase().includes(clientSearch.toLowerCase())) ||
+                            (c.phone && c.phone.includes(clientSearch))
+                          )
+                          .map((c) => (
+                            <div 
+                              key={c.id} 
+                              onClick={() => { setSelectedClientId(String(c.id)); setShowDropdown(false); }}
+                              className={`px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-all ${selectedClientId === String(c.id) ? 'bg-[#137fec] text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                            >
+                              <div className="font-semibold">{c.name}</div>
+                              {c.email && <div className={`text-[11px] mt-0.5 ${selectedClientId === String(c.id) ? 'text-blue-100' : 'text-slate-500'}`}>{c.email}</div>}
+                            </div>
+                          ))
+                      ) : (
+                        <div className="px-4 py-6 text-center">
+                          <span className="material-symbols-outlined text-slate-600 text-3xl mb-2">person_search</span>
+                          <p className="text-sm text-slate-500 italic">Aucun client trouvé</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -398,7 +464,7 @@ const OrderCreateModal: React.FC<{
                   onClick={() => setForm({ ...form, isCredit: !form.isCredit })}
                   className={`w-10 h-6 rounded-full transition-colors relative ${form.isCredit ? 'bg-cyan-500' : 'bg-slate-700'}`}
                 >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.isCredit ? 'translate-x-5' : 'translate-x-1'}`} />
+                  <div className={`absolute top-1 w-4 h-4 bg-[#0d1520] rounded-full shadow transition-transform ${form.isCredit ? 'translate-x-5' : 'translate-x-1'}`} />
                 </div>
                 <span className="text-sm text-slate-300">Commande à crédit</span>
               </label>
@@ -584,15 +650,29 @@ const OrderDetail: React.FC<{
   onEdit: (order: Order) => void;
   onNavigate?: (page: string) => void;
 }> = ({ order, onBack, onStatusChange, onDelete, onEdit, onNavigate }) => {
+  const PAGE_SIZE = 6;
   const [statusOverride, setStatusOverride] = useState(order.status);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [detailItemsPage, setDetailItemsPage] = useState(1);
 
   const payments = Array.isArray(order.payments) ? order.payments : [];
   const paidAmount = payments.reduce((s, p) => s + p.amount, 0);
   const remaining = order.total - paidAmount;
+  const orderItemsTotalPages = Math.max(
+    1,
+    Math.ceil(order.items.length / PAGE_SIZE),
+  );
+  const paginatedOrderItems = order.items.slice(
+    (detailItemsPage - 1) * PAGE_SIZE,
+    detailItemsPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setDetailItemsPage(1);
+  }, [order.id]);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
         <button onClick={onBack} className="text-[#137fec] hover:text-blue-400 font-medium transition-colors">
@@ -611,6 +691,16 @@ const OrderDetail: React.FC<{
           <p className="text-slate-400 text-sm mt-1">
             {order.client.name} · {formatDate(order.createdAt)}
           </p>
+          {order.author && (
+            <div className="flex items-center gap-2 mt-2">
+              <div className="w-6 h-6 rounded-full bg-[#137fec] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                {order.author.name.charAt(0).toUpperCase()}
+              </div>
+              <span className="text-xs text-slate-400">
+                Créé par <span className="text-slate-200 font-medium">{order.author.name}</span>
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -788,7 +878,7 @@ const OrderDetail: React.FC<{
               </tr>
             </thead>
             <tbody>
-              {order.items.map(item => {
+              {paginatedOrderItems.map(item => {
                 const product: any = item.product || {};
                 const imageUrl =
                   product.imageUrl ||
@@ -863,6 +953,29 @@ const OrderDetail: React.FC<{
             </tbody>
           </table>
         </div>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {detailItemsPage} sur {orderItemsTotalPages} · {order.items.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setDetailItemsPage((p) => Math.max(1, p - 1))}
+              disabled={detailItemsPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() =>
+                setDetailItemsPage((p) => Math.min(orderItemsTotalPages, p + 1))
+              }
+              disabled={detailItemsPage === orderItemsTotalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
+        </div>
         <div className="px-6 py-4 border-t border-slate-800 flex justify-end">
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-400">Total commande</span>
@@ -881,6 +994,7 @@ interface OrdersProps {
 }
 
 const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
+  const PAGE_SIZE = 6;
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
@@ -893,6 +1007,7 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [deleteConfirmOrder, setDeleteConfirmOrder] = useState<Order | null>(null);
   const [statusConfirm, setStatusConfirm] = useState<{ id: number; status: OrderStatus } | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -1019,6 +1134,21 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
       String(o.id).includes(search);
     return matchStatus && matchType && matchSearch;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedOrders = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter, typeFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const pendingCount   = orders.filter(o => o.status === 'PENDING').length;
   const deliveredCount = orders.filter(o => o.status === 'DELIVERED').length;
@@ -1047,7 +1177,7 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 sm:p-6 space-y-6">
 
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1130,7 +1260,7 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(order => (
+                {paginatedOrders.map(order => (
                   <tr
                     key={order.id}
                     className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors group cursor-pointer"
@@ -1143,6 +1273,9 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
                       <div>{order.client.name}</div>
                       {order.client.email && (
                         <div className="text-xs text-slate-500">{order.client.email}</div>
+                      )}
+                      {order.client.phone && (
+                        <div className="text-xs text-slate-500">{order.client.phone}</div>
                       )}
                     </td>
                     <td className="px-6 py-4">
@@ -1208,12 +1341,33 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
               </tbody>
             </table>
           </div>
+          <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              Page {currentPage} sur {totalPages} · {filtered.length} résultats
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+              >
+                Précédent
+              </button>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+              >
+                Suivant
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Stats Footer */}
       <div className="border-t border-slate-800 bg-[#0d1520] px-6 py-4 shrink-0">
-        <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <div className="bg-slate-800/30 rounded-xl p-4">
             <p className="text-xs font-medium text-slate-400 mb-1">Total des Commandes</p>
             <p className="text-xl font-black text-white">{orders.length}</p>
@@ -1225,7 +1379,7 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
           <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-xl p-4">
             <p className="text-xs font-medium text-slate-400 mb-1">Commandes Crédit</p>
             <p className="text-xl font-black text-cyan-400">{creditCount}</p>
-          </div>
+            </div>
           <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4">
             <p className="text-xs font-medium text-slate-400 mb-1">Livrées</p>
             <p className="text-xl font-black text-blue-400">{deliveredCount}</p>

@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import type {
   ApiCredit as Credit,
   ApiOrder as Order,
-  ApiClient as Client,
   CreditStatus,
   ClientType,
 } from '@/api/credits';
@@ -131,13 +130,26 @@ const CreateCreditModal: React.FC<{
   }) => Promise<void> | void;
 }> = ({ orders, onClose, onSave }) => {
   // Only allow linking to orders that are not cancelled
-  const creditOrders = orders.filter(o => o.status !== 'CANCELLED');
+  const creditOrders = orders.filter(o => o.isCredit === true && o.status !== 'CANCELLED');
   const [orderId, setOrderId]     = useState<string>('');
   const [amount, setAmount]       = useState('');
   const [limitedDate, setDate]    = useState('');
   const [status, setStatus]       = useState<CreditStatus>('ACTIVE');
   const [error, setError]         = useState('');
   const [saving, setSaving]       = useState(false);
+  const [orderSearch, setOrderSearch] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const selectedOrder = creditOrders.find(o => o.id === orderId);
 
@@ -146,6 +158,15 @@ const CreateCreditModal: React.FC<{
     if (!amount)       { setError('Veuillez saisir un montant.'); return; }
     if (!limitedDate)  { setError('Veuillez choisir une date limite.'); return; }
     if (!selectedOrder){ setError('Commande introuvable.'); return; }
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setError("Le montant saisi n'est pas valide.");
+      return;
+    }
+    if (parsedAmount > selectedOrder.total) {
+      setError(`Le montant du crédit ne peut pas dépasser le total de la commande (${fmt(selectedOrder.total)}).`);
+      return;
+    }
     if (selectedOrder.status === 'CANCELLED') {
       setError("Impossible de créer un crédit pour une commande annulée.");
       return;
@@ -157,7 +178,7 @@ const CreateCreditModal: React.FC<{
       await onSave({
         clientId: selectedOrder.clientId,
         orderId:  selectedOrder.id,
-        amount:   parseFloat(amount),
+        amount:   parsedAmount,
         status,
         limitedDate,
       });
@@ -193,22 +214,78 @@ const CreateCreditModal: React.FC<{
         <div className="overflow-y-auto flex-1 p-6 space-y-4">
 
           {/* Order picker */}
-          <div>
+          <div className="relative" ref={dropdownRef}>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
               Commande liée <span className="text-rose-400">*</span>
             </label>
-            <select
-              value={orderId}
-              onChange={e => { setOrderId(e.target.value); setError(''); }}
-              className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
+            <div 
+              className={`flex flex-col bg-slate-800/50 border rounded-lg overflow-hidden transition-colors ${showDropdown ? 'border-[#137fec]/50 ring-1 ring-[#137fec]/20' : 'border-slate-700'}`}
             >
-              <option value="">Sélectionner une commande à crédit</option>
-              {creditOrders.map(o => (
-                <option key={o.id} value={o.id}>
-                   {o.client.name} · {fmt(o.total)}
-                </option>
-              ))}
-            </select>
+              <div className="relative border-b border-slate-700/50">
+                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+                <input
+                  type="text"
+                  placeholder="Filtrer par client, ID ou montant..."
+                  value={orderSearch}
+                  onFocus={() => setShowDropdown(true)}
+                  onChange={e => { setOrderSearch(e.target.value); setShowDropdown(true); }}
+                  className="w-full bg-transparent pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none"
+                />
+              </div>
+              <div 
+                onClick={() => setShowDropdown(!showDropdown)}
+                className="px-3 py-2.5 text-sm text-white cursor-pointer flex justify-between items-center hover:bg-slate-700/30 transition-colors"
+              >
+                <span className={orderId ? 'text-white font-medium' : 'text-slate-500'}>
+                  {orderId 
+                    ? creditOrders.find(o => String(o.id) === orderId)?.client.name + ' · ' + fmt(creditOrders.find(o => String(o.id) === orderId)?.total ?? 0)
+                    : 'Sélectionner une commande'}
+                </span>
+                <span className={`material-symbols-outlined text-slate-500 text-sm transition-transform duration-200 ${showDropdown ? 'rotate-180' : ''}`}>
+                  expand_more
+                </span>
+              </div>
+            </div>
+
+            {showDropdown && (
+              <div className="absolute z-50 w-full mt-1 bg-[#161f2c] border border-slate-700 rounded-xl shadow-2xl max-h-64 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-1">
+                  {creditOrders
+                    .filter(o => 
+                      o.client.name.toLowerCase().includes(orderSearch.toLowerCase()) || 
+                      String(o.id).includes(orderSearch) ||
+                      o.total.toString().includes(orderSearch) ||
+                      fmt(o.total).toLowerCase().includes(orderSearch.toLowerCase())
+                    )
+                    .length > 0 ? (
+                    creditOrders
+                      .filter(o => 
+                        o.client.name.toLowerCase().includes(orderSearch.toLowerCase()) || 
+                        String(o.id).includes(orderSearch) ||
+                        o.total.toString().includes(orderSearch) ||
+                        fmt(o.total).toLowerCase().includes(orderSearch.toLowerCase())
+                      )
+                      .map((o) => (
+                        <div 
+                          key={o.id} 
+                          onClick={() => { setOrderId(String(o.id)); setError(''); setShowDropdown(false); }}
+                          className={`px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-all ${orderId === String(o.id) ? 'bg-[#137fec] text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                        >
+                          <div className="font-semibold">{o.client.name}</div>
+                          <div className={`text-[11px] mt-0.5 ${orderId === String(o.id) ? 'text-blue-100' : 'text-slate-500'}`}>
+                            #{String(o.id).padStart(3, '0')} · {fmt(o.total)} · {fmtDate(o.createdAt)}
+                          </div>
+                        </div>
+                      ))
+                  ) : (
+                    <div className="px-4 py-6 text-center">
+                      <span className="material-symbols-outlined text-slate-600 text-3xl mb-2">order_approve</span>
+                      <p className="text-sm text-slate-500 italic">Aucune commande trouvée</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Selected order preview */}
@@ -243,7 +320,19 @@ const CreateCreditModal: React.FC<{
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
               Montant du crédit (GNF) <span className="text-rose-400">*</span>
             </label>
-            <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+            <input 
+              type="number" 
+              value={amount} 
+              onChange={e => {
+                const val = e.target.value;
+                if (selectedOrder && parseFloat(val) > selectedOrder.total) {
+                  setAmount(selectedOrder.total.toString());
+                } else {
+                  setAmount(val);
+                }
+                setError('');
+              }}
+              max={selectedOrder?.total}
               placeholder="Ex: 500000"
               className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50" />
             {selectedOrder && parseFloat(amount) > selectedOrder.client.creditLimit && (
@@ -315,7 +404,7 @@ const CreditDetail: React.FC<{
   const isOverdue = days < 0;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
         <button onClick={onBack} className="text-[#137fec] hover:text-blue-400 font-medium transition-colors">
@@ -336,6 +425,16 @@ const CreditDetail: React.FC<{
           <p className="text-slate-400 text-sm">
             Crédit #{String(credit.id).padStart(3,'0')} · Commande #{String(credit.orderId).padStart(3,'0')} · Créé le {fmtDate(credit.createdAt)}
           </p>
+          {credit.author && (
+            <div className="flex items-center gap-2 mt-2">
+              <div className="w-6 h-6 rounded-full bg-[#137fec] flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
+                {credit.author.name.charAt(0).toUpperCase()}
+              </div>
+              <span className="text-xs text-slate-400">
+                Créé par <span className="text-slate-200 font-medium">{credit.author.name}</span>
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button onClick={onBack}
@@ -482,6 +581,7 @@ const CreditDetail: React.FC<{
 // ─── Main Credit Component ────────────────────────────────────────────────────
 
 const CreditPage: React.FC = () => {
+  const PAGE_SIZE = 6;
   const [credits, setCredits]           = useState<Credit[]>([]);
   const [orders, setOrders]             = useState<Order[]>([]);
   const [selectedCredit, setSelected]   = useState<Credit | null>(null);
@@ -492,6 +592,7 @@ const CreditPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | CreditStatus>('all');
   const [loading, setLoading]           = useState(false);
   const [loadError, setLoadError]       = useState('');
+  const [currentPage, setCurrentPage]   = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -575,7 +676,7 @@ const CreditPage: React.FC = () => {
     }
   };
 
-  const handleSettle = (creditId: number, amountPaid: number, method: string, reference: string) => {
+  const handleSettle = (creditId: number, amountPaid: number, _method: string, _reference: string) => {
     setCredits(prev => prev.map(c => {
       if (c.id !== creditId) return c;
       const newAmount = Math.max(0, c.amount - amountPaid);
@@ -629,6 +730,21 @@ const CreditPage: React.FC = () => {
     const matchStatus = statusFilter === 'all' || c.status === statusFilter;
     return matchSearch && matchStatus;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginatedCredits = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   // ── Stats ─────────────────────────────────────────────────────────────────
 
@@ -656,7 +772,7 @@ const CreditPage: React.FC = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -752,7 +868,7 @@ const CreditPage: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(credit => {
+              {paginatedCredits.map(credit => {
                 const days = daysUntil(credit.limitedDate);
                 const overdue = days < 0 && credit.status === 'ACTIVE';
                 return (
@@ -831,6 +947,27 @@ const CreditPage: React.FC = () => {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {currentPage} sur {totalPages} · {filtered.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
         </div>
       </div>
 

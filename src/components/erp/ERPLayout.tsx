@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopHeader from './TopHeader';
@@ -13,10 +13,12 @@ import Payments from './Payments';
 import Users from './Users';
 import Reports from './Reports';
 import StockLog from './StockLog';
+import CodePromo from './CodePromo';
 
 const ERPLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const path = location.pathname;
 
@@ -32,6 +34,7 @@ const ERPLayout: React.FC = () => {
     : path === '/users' ? 'utilisateurs'
     : path === '/reports' ? 'rapports'
     : path === '/stock' ? 'stock'
+    : path === '/promo-codes' ? 'promo-codes'
     : 'dashboard';
 
   const handleNavigate = (page: string) => {
@@ -69,9 +72,13 @@ const ERPLayout: React.FC = () => {
       case 'stock':
         navigate('/stock');
         break;
+      case 'promo-codes':
+        navigate('/promo-codes');
+        break;
       default:
         navigate('/');
     }
+    setIsSidebarOpen(false);
   };
 
   const renderPage = () => {
@@ -98,6 +105,8 @@ const ERPLayout: React.FC = () => {
         return <Reports />;
       case 'stock':
         return <StockLog />;
+      case 'promo-codes':
+        return <CodePromo />;
       default:
         return <Dashboard onNavigate={handleNavigate} />;
     }
@@ -105,9 +114,18 @@ const ERPLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#101922] flex">
-      <Sidebar currentPage={currentPage} onNavigate={handleNavigate} />
-      <div className="flex-1 ml-64 min-h-screen flex flex-col overflow-hidden">
-        <TopHeader currentPage={currentPage} onNavigate={handleNavigate} />
+      <Sidebar
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+      />
+      <div className="flex-1 lg:ml-64 min-h-screen flex flex-col overflow-hidden">
+        <TopHeader
+          currentPage={currentPage}
+          onNavigate={handleNavigate}
+          onMenuClick={() => setIsSidebarOpen(true)}
+        />
         <main className="flex-1 overflow-y-auto">
           {renderPage()}
         </main>

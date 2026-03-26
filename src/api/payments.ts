@@ -1,5 +1,5 @@
 const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.126:5000";
+  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.137:5000";
 
 export interface ApiPayment {
   id: number;
@@ -15,6 +15,7 @@ export interface ApiPayment {
   customerName?: string | null;
   source?: "détail" | "gros" | "crédit";
   status?: "terminé" | "en_attente" | "annulé";
+  author?: { id: string; name: string; email: string } | null;
 }
 
 export async function fetchPayments(): Promise<ApiPayment[]> {

@@ -50,11 +50,13 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
+  const PAGE_SIZE = 6;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [orders, setOrders] = useState<any[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,11 +126,29 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     const d = new Date(o.createdAt);
     return d.toDateString() === today ? sum + o.total : sum;
   }, 0);
+  const sortedOrders = orders
+    .slice()
+    .sort((a, b) => {
+      const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return db - da;
+    });
+  const totalPages = Math.max(1, Math.ceil(sortedOrders.length / PAGE_SIZE));
+  const paginatedOrders = sortedOrders.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">Vue d'ensemble du Tableau de Bord</h1>
           <p className="text-slate-400 text-sm mt-1">{getWelcomeLine()}</p>
@@ -160,7 +180,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <MetricCard
           title="Ventes Totales"
           value={`GNF ${totalSales.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}`}
@@ -227,15 +247,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </tr>
             </thead>
             <tbody>
-              {orders
-                .slice()
-                .sort((a, b) => {
-                  const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-                  const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-                  return db - da;
-                })
-                .slice(0, 5)
-                .map((o) => (
+              {paginatedOrders.map((o) => (
                   <tr key={o.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
                     <td className="px-6 py-3.5 text-sm font-mono text-[#137fec]">
                       #{String(o.id).padStart(3, '0')}
@@ -272,6 +284,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="px-6 py-3 border-t border-slate-800 flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            Page {currentPage} sur {totalPages} · {orders.length} résultats
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Précédent
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 disabled:opacity-50"
+            >
+              Suivant
+            </button>
+          </div>
         </div>
       </div>
 
