@@ -171,8 +171,9 @@ const CodePromo: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
+  const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const filtered = promos.filter(p =>
-    p.code.toLowerCase().includes(search.toLowerCase())
+    !words.length || words.every(w => p.code.toLowerCase().includes(w))
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);

@@ -206,10 +206,12 @@ const SubCategoriesPage: React.FC = () => {
       sc.categoryId === selectedCategoryFilter;
     const query = search.trim().toLowerCase();
     if (!query) return catMatch;
-    const nameMatch = sc.name.toLowerCase().includes(query);
+    const words = query.split(/\s+/).filter(Boolean);
     const parentName = categories.find(c => c.id === sc.categoryId)?.name ?? '';
-    const parentMatch = parentName.toLowerCase().includes(query);
-    return catMatch && (nameMatch || parentMatch);
+    const matchSearch = words.every(w =>
+      sc.name.toLowerCase().includes(w) || parentName.toLowerCase().includes(w)
+    );
+    return catMatch && matchSearch;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginatedSubCategories = filtered.slice(

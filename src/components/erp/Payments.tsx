@@ -98,7 +98,7 @@ const PaymentModal: React.FC<{
                 >
                   <span className={form.orderId ? 'text-white font-medium' : 'text-slate-500'}>
                     {form.orderId 
-                      ? `CMD-${String(payableOrders.find(o => String(o.id) === form.orderId)?.id).padStart(3, '0')} · ${payableOrders.find(o => String(o.id) === form.orderId)?.client?.name ?? 'Client'}`
+                      ? `CMD-${String(payableOrders.find(o => String(o.id) === form.orderId)?.id).slice(0, 8)} · ${payableOrders.find(o => String(o.id) === form.orderId)?.client?.name ?? 'Client'}`
                       : 'Sélectionner une commande'}
                   </span>
                   <span className={`material-symbols-outlined text-slate-500 text-sm transition-transform duration-200 ${showDropdown ? 'rotate-180' : ''}`}>
@@ -129,7 +129,7 @@ const PaymentModal: React.FC<{
                             onClick={() => { setForm({ ...form, orderId: String(o.id), customer: o.client?.name || '' }); setShowDropdown(false); }}
                             className={`px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-all ${form.orderId === String(o.id) ? 'bg-[#137fec] text-white' : 'text-slate-300 hover:bg-slate-800'}`}
                           >
-                            <div className="font-semibold">CMD-{String(o.id).padStart(3, '0')}</div>
+                            <div className="font-semibold">CMD-{String(o.id).slice(0, 8)}</div>
                             <div className={`text-[11px] mt-0.5 ${form.orderId === String(o.id) ? 'text-blue-100' : 'text-slate-500'}`}>
                               {o.client?.name ?? `Client #${o.clientId}`} · {o.total?.toLocaleString('fr-FR')} GNF
                             </div>
@@ -262,7 +262,7 @@ const PaymentDetail: React.FC<{
 }> = ({ payment, order, onBack }) => {
   const createdAtLabel = payment.date;
   const orderLabel = payment.orderId
-    ? `CMD-${String(payment.orderId).padStart(3, '0')}`
+    ? `CMD-${String(payment.orderId).slice(0, 8)}`
     : '—';
   const clientName =
     order?.client?.name ?? payment.customer ?? 'Client inconnu';
@@ -584,14 +584,14 @@ const Payments: React.FC = () => {
     const query = search.trim().toLowerCase();
     if (!query) return matchMethod;
 
-    const inReference = p.reference.toLowerCase().includes(query);
-    const inCustomer = p.customer.toLowerCase().includes(query);
-    const inOrderId =
-      p.orderId != null && String(p.orderId).includes(query);
-    const inId = p.id.toLowerCase().includes(query);
-
-    const matchSearch =
-      inReference || inCustomer || inOrderId || inId;
+    const words = query.split(/\s+/).filter(Boolean);
+    const orderId = p.orderId != null ? String(p.orderId) : '';
+    const matchSearch = words.every(w =>
+      p.reference.toLowerCase().includes(w) ||
+      p.customer.toLowerCase().includes(w) ||
+      orderId.includes(w) ||
+      p.id.toLowerCase().includes(w)
+    );
 
     return matchMethod && matchSearch;
   });

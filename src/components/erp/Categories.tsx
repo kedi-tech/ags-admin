@@ -143,9 +143,12 @@ const Categories: React.FC = () => {
     };
   }, []);
 
+  const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const filtered = categories.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.description.toLowerCase().includes(search.toLowerCase())
+    !words.length || words.every(w =>
+      c.name.toLowerCase().includes(w) ||
+      c.description.toLowerCase().includes(w)
+    )
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginatedCategories = filtered.slice(

@@ -61,13 +61,13 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Logo */}
       <div className="px-6 py-5 border-b border-slate-800">
         <div className="flex flex-col items-center ">
-          <div className="w-64 h-32 rounded-lg overflow-hidden  flex items-center justify-center">
+          <button onClick={() => { onNavigate('dashboard'); onClose?.(); }} className="w-64 h-32 rounded-lg overflow-hidden flex items-center justify-center focus:outline-none">
             <img
               src="/ags_logo.png"
               alt="Alliance Solution Group"
               className="w-full h-full object-contain"
             />
-          </div>
+          </button>
           <div>
             <p className="text-white font-black text-sm tracking-tight leading-none">
               Alliance SG

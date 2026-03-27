@@ -679,14 +679,14 @@ const OrderDetail: React.FC<{
           Gestion des Commandes
         </button>
         <span className="text-slate-500">›</span>
-        <span className="text-white font-medium">CMD-{String(order.id).padStart(3, '0')}</span>
+        <span className="text-white font-medium">CMD-{String(order.id).slice(0, 8)}</span>
       </div>
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            Commande #{String(order.id).padStart(3, '0')}
+            Commande #{String(order.id).slice(0, 8)}
           </h1>
           <p className="text-slate-400 text-sm mt-1">
             {order.client.name} · {formatDate(order.createdAt)}
@@ -731,7 +731,7 @@ const OrderDetail: React.FC<{
           <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <h3 className="text-white font-bold text-lg mb-2">Supprimer la commande</h3>
             <p className="text-slate-400 text-sm mb-4">
-              Êtes-vous sûr de vouloir supprimer la commande #{order.id} ?
+              Êtes-vous sûr de vouloir supprimer la commande #{String(order.id).slice(0, 8)} ?
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -1129,9 +1129,21 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
       (typeFilter === 'credit' && o.isCredit) ||
       (typeFilter !== 'credit' && !o.isCredit && clientType === typeFilter);
     const clientName = o.client?.name?.toLowerCase() ?? '';
-    const matchSearch =
-      clientName.includes(search.toLowerCase()) ||
-      String(o.id).includes(search);
+    const clientEmail = o.client?.email?.toLowerCase() ?? '';
+    const clientPhone = (o.client?.phone ?? '').replace(/\D/g, '');
+    const clientPhoneText = o.client?.phone?.toLowerCase() ?? '';
+    const orderId = String(o.id);
+    const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const matchSearch = !words.length || words.every(w => {
+      const wDigits = w.replace(/\D/g, '');
+      return (
+        clientName.includes(w) ||
+        clientEmail.includes(w) ||
+        clientPhoneText.includes(w) ||
+        orderId.includes(w) ||
+        (wDigits.length > 0 && clientPhone.includes(wDigits))
+      );
+    });
     return matchStatus && matchType && matchSearch;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -1267,7 +1279,7 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
                     onClick={() => setSelectedOrder(order)}
                   >
                     <td className="px-6 py-4 text-sm font-mono text-[#137fec]">
-                      #{String(order.id).padStart(3, '0')}
+                      #{String(order.id).slice(0, 8)}
                     </td>
                     <td className="px-6 py-4 text-sm font-medium text-white">
                       <div>{order.client.name}</div>
@@ -1403,7 +1415,7 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
           <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <h3 className="text-white font-bold text-lg mb-2">Supprimer la commande</h3>
             <p className="text-slate-400 text-sm mb-4">
-              Supprimer la commande #{deleteConfirmOrder.id} ?
+              Supprimer la commande #{String(deleteConfirmOrder.id).slice(0, 8)} ?
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -1432,7 +1444,7 @@ const Orders: React.FC<OrdersProps> = ({ onNavigate }) => {
           <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <h3 className="text-white font-bold text-lg mb-2">Annuler la commande</h3>
             <p className="text-slate-400 text-sm mb-4">
-              Êtes-vous sûr de vouloir annuler la commande #{statusConfirm.id} ?
+              Êtes-vous sûr de vouloir annuler la commande #{String(statusConfirm.id).slice(0, 8)} ?
             </p>
             <div className="flex justify-end gap-3">
               <button

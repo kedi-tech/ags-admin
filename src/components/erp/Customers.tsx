@@ -162,11 +162,16 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
       return matchType;
     }
 
-    const matchSearch =
-      normalizedName.includes(query) ||
-      normalizedEmail.includes(query) ||
-      normalizedPhoneText.includes(query) ||
-      (phoneQuery.length > 0 && normalizedPhoneDigits.includes(phoneQuery));
+    const words = query.split(/\s+/).filter(Boolean);
+    const matchSearch = words.every(w => {
+      const wDigits = normalizePhone(w);
+      return (
+        normalizedName.includes(w) ||
+        normalizedEmail.includes(w) ||
+        normalizedPhoneText.includes(w) ||
+        (wDigits.length > 0 && normalizedPhoneDigits.includes(wDigits))
+      );
+    });
     return matchType && matchSearch;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -374,7 +379,7 @@ const Customers: React.FC<CustomersProps> = ({ onNavigate }) => {
                     }}
                   >
                   <td className="px-6 py-3.5 text-sm font-mono text-[#137fec]">
-                    #{String(o.id).padStart(3, '0')}
+                    #{String(o.id).slice(0, 8)}
                   </td>
                     <td className="px-6 py-3.5 text-sm font-semibold text-white">
                       GNF {o.total.toLocaleString('fr-FR')}

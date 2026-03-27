@@ -61,7 +61,7 @@ const SettleModal: React.FC<{
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <div>
             <h2 className="text-white font-bold text-lg">Régler le Paiement</h2>
-            <p className="text-slate-400 text-xs mt-0.5">{credit.client.name} · Crédit #{String(credit.id).padStart(3,'0')}</p>
+            <p className="text-slate-400 text-xs mt-0.5">{credit.client.name} · Crédit #{String(credit.id).slice(0, 8)}</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-xl leading-none">✕</button>
         </div>
@@ -273,7 +273,7 @@ const CreateCreditModal: React.FC<{
                         >
                           <div className="font-semibold">{o.client.name}</div>
                           <div className={`text-[11px] mt-0.5 ${orderId === String(o.id) ? 'text-blue-100' : 'text-slate-500'}`}>
-                            #{String(o.id).padStart(3, '0')} · {fmt(o.total)} · {fmtDate(o.createdAt)}
+                            #{String(o.id).slice(0, 8)} · {fmt(o.total)} · {fmtDate(o.createdAt)}
                           </div>
                         </div>
                       ))
@@ -411,7 +411,7 @@ const CreditDetail: React.FC<{
           Gestion du Crédit
         </button>
         <span className="text-slate-500">›</span>
-        <span className="text-white font-medium">Crédit #{String(credit.id).padStart(3,'0')}</span>
+        <span className="text-white font-medium">Crédit #{String(credit.id).slice(0, 8)}</span>
       </div>
 
       {/* Header */}
@@ -423,7 +423,7 @@ const CreditDetail: React.FC<{
             <CreditStatusBadge status={credit.status} />
           </div>
           <p className="text-slate-400 text-sm">
-            Crédit #{String(credit.id).padStart(3,'0')} · Commande #{String(credit.orderId).padStart(3,'0')} · Créé le {fmtDate(credit.createdAt)}
+            Crédit #{String(credit.id).slice(0, 8)} · Commande #{String(credit.orderId).slice(0, 8)} · Créé le {fmtDate(credit.createdAt)}
           </p>
           {credit.author && (
             <div className="flex items-center gap-2 mt-2">
@@ -535,7 +535,7 @@ const CreditDetail: React.FC<{
 
         <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
           <h3 className="text-white font-bold mb-4 flex items-center gap-2">
-            <span className="text-[#137fec]">🧾</span> Commande liée #{String(credit.orderId).padStart(3,'0')}
+            <span className="text-[#137fec]">🧾</span> Commande liée #{String(credit.orderId).slice(0, 8)}
           </h3>
           <div className="space-y-2.5">
             <div className="flex justify-between">
@@ -723,10 +723,21 @@ const CreditPage: React.FC = () => {
   // ── Filters ───────────────────────────────────────────────────────────────
 
   const filtered = credits.filter(c => {
-    const matchSearch =
-      c.client.name.toLowerCase().includes(search.toLowerCase()) ||
-      String(c.id).includes(search) ||
-      String(c.orderId).includes(search);
+    const clientPhone = (c.client.phone ?? '').replace(/\D/g, '');
+    const clientPhoneText = c.client.phone?.toLowerCase() ?? '';
+    const clientEmail = c.client.email?.toLowerCase() ?? '';
+    const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const matchSearch = !words.length || words.every(w => {
+      const wDigits = w.replace(/\D/g, '');
+      return (
+        c.client.name.toLowerCase().includes(w) ||
+        clientEmail.includes(w) ||
+        clientPhoneText.includes(w) ||
+        String(c.id).includes(w) ||
+        String(c.orderId).includes(w) ||
+        (wDigits.length > 0 && clientPhone.includes(wDigits))
+      );
+    });
     const matchStatus = statusFilter === 'all' || c.status === statusFilter;
     return matchSearch && matchStatus;
   });
@@ -878,7 +889,7 @@ const CreditPage: React.FC = () => {
                     onClick={() => setSelected(credit)}
                   >
                     <td className="px-6 py-4 text-sm font-mono text-[#137fec]">
-                      #{String(credit.id).padStart(3,'0')}
+                      #{String(credit.id).slice(0, 8)}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
@@ -892,7 +903,7 @@ const CreditPage: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm font-mono text-slate-400">
-                      #{String(credit.orderId).padStart(3,'0')}
+                      #{String(credit.orderId).slice(0, 8)}
                     </td>
                     <td className="px-6 py-4 text-sm font-bold text-rose-400">
                       {fmt(credit.amount)}
@@ -994,7 +1005,7 @@ const CreditPage: React.FC = () => {
           <div className="relative bg-[#0d1520] border border-slate-800 rounded-2xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <h3 className="text-white font-bold text-lg mb-2">Supprimer le crédit</h3>
             <p className="text-slate-400 text-sm mb-1">
-              Supprimer le crédit <span className="text-white font-semibold">#{String(deleteConfirm.id).padStart(3,'0')}</span> de{' '}
+              Supprimer le crédit <span className="text-white font-semibold">#{String(deleteConfirm.id).slice(0, 8)}</span> de{' '}
               <span className="text-white font-semibold">{deleteConfirm.client.name}</span> ?
             </p>
             <p className="text-xs text-slate-500 mb-4">Cette action est irréversible.</p>

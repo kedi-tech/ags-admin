@@ -250,7 +250,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               {paginatedOrders.map((o) => (
                   <tr key={o.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
                     <td className="px-6 py-3.5 text-sm font-mono text-[#137fec]">
-                      #{String(o.id).padStart(3, '0')}
+                      #{String(o.id).slice(0, 8)}
                     </td>
                     <td className="px-6 py-3.5 text-sm font-medium text-white">
                       {o.client?.name ?? 'Client inconnu'}

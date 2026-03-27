@@ -147,10 +147,12 @@ const StockLog: React.FC = () => {
 
   const filtered = adjustments.filter(a => {
     const matchType = typeFilter === 'tous' || a.type === typeFilter;
-    const matchSearch =
-      a.product.toLowerCase().includes(search.toLowerCase()) ||
-      a.sku.toLowerCase().includes(search.toLowerCase()) ||
-      a.adminUser.toLowerCase().includes(search.toLowerCase());
+    const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const matchSearch = !words.length || words.every(w =>
+      a.product.toLowerCase().includes(w) ||
+      a.sku.toLowerCase().includes(w) ||
+      a.adminUser.toLowerCase().includes(w)
+    );
     return matchType && matchSearch;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));

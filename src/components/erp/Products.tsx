@@ -873,9 +873,10 @@ const Products: React.FC = () => {
       activeCategory === 'all' || p.categoryId === activeCategory;
     const matchSubCat =
       activeSubCategory === 'all' || p.subCategoryId === activeSubCategory;
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase());
+    const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const matchSearch = !words.length || words.every(w =>
+      p.name.toLowerCase().includes(w) || p.sku.toLowerCase().includes(w)
+    );
     return matchCat && matchSubCat && matchSearch;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));

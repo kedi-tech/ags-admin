@@ -47,7 +47,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({
           <span className="material-symbols-outlined">menu</span>
         </button>
         {/* Logo */}
-        <div className="hidden sm:flex items-center gap-2.5 shrink-0">
+        <button onClick={() => onNavigate('dashboard')} className="hidden sm:flex items-center gap-2.5 shrink-0 focus:outline-none">
           <div className="w-7 h-7 rounded-lg overflow-hidden bg-slate-900 flex items-center justify-center">
             <img
               src="/ags_logo.png"
@@ -58,7 +58,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({
           <span className="text-white font-black text-sm tracking-tight">
             Alliance Solution Group
           </span>
-        </div>
+        </button>
 
         {/* Search */}
         <div className="flex-1 max-w-md min-w-0">

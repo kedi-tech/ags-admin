@@ -325,9 +325,11 @@ const Users: React.FC = () => {
     const matchTab = tab === 'tous' || u.role === tab;
     const query = search.trim().toLowerCase();
     if (!query) return matchTab;
-    const inName = u.name.toLowerCase().includes(query);
-    const inEmail = u.email.toLowerCase().includes(query);
-    return matchTab && (inName || inEmail);
+    const words = query.split(/\s+/).filter(Boolean);
+    const matchSearch = words.every(w =>
+      u.name.toLowerCase().includes(w) || u.email.toLowerCase().includes(w)
+    );
+    return matchTab && matchSearch;
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginatedUsers = filtered.slice(
