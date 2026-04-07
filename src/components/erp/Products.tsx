@@ -87,7 +87,7 @@ const ProductModal: React.FC<{
     imageUrl: product?.imageUrl || '',
     // Keep numeric fields as strings for better UX in number inputs
     price: product ? String(product.price) : '',
-    companyPrice: product?.companyPrice != null ? String(product.companyPrice) : '',
+    deliveryPrice: product?.deliveryPrice != null ? String(product.deliveryPrice) : '',
     stock: product ? String(product.stock) : '',
     isActive: product?.isActive ?? true,
     isPromotional: product?.isPromotional ?? false,
@@ -430,7 +430,7 @@ const ProductModal: React.FC<{
               </div>
             )}
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Prix Détail (GNF)</label>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Prix(GNF)</label>
               <input
                 type="number"
                 value={form.price}
@@ -439,11 +439,11 @@ const ProductModal: React.FC<{
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Prix Gros (GNF)</label>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Prix de Livraison (GNF)</label>
               <input
                 type="number"
-                value={form.companyPrice}
-                onChange={e => setForm({ ...form, companyPrice: e.target.value })}
+                value={form.deliveryPrice}
+                onChange={e => setForm({ ...form, deliveryPrice: e.target.value })}
                 className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#137fec]/50"
               />
             </div>
@@ -492,7 +492,7 @@ const ProductModal: React.FC<{
                 const parsedPrice =
                   form.price === '' ? 0 : parseFloat(form.price);
                 const parsedCompanyPrice =
-                  form.companyPrice === '' ? null : parseFloat(form.companyPrice);
+                  form.deliveryPrice === '' ? null : parseFloat(form.deliveryPrice);
                 const parsedStock =
                   form.stock === '' ? 0 : parseInt(form.stock, 10);
                 const parsedPromoPrice =
@@ -504,7 +504,7 @@ const ProductModal: React.FC<{
                     description: form.description,
                     imageUrl: form.imageUrl,
                     price: parsedPrice,
-                    companyPrice: parsedCompanyPrice ?? null,
+                    deliveryPrice: parsedCompanyPrice ?? null,
                     stock: parsedStock,
                     isActive: form.isActive,
                     isPromotional: form.isPromotional,
@@ -634,15 +634,15 @@ const ProductDetail: React.FC<{
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-slate-900/60 rounded-lg p-3">
-                <p className="text-xs text-slate-400">Prix Détail</p>
+                <p className="text-xs text-slate-400">Prix</p>
                 <p className="mt-1 text-lg font-semibold text-white">
                   GNF {product.price.toFixed(2)}
                 </p>
               </div>
               <div className="bg-slate-900/60 rounded-lg p-3">
-                <p className="text-xs text-slate-400">Prix Gros</p>
+                <p className="text-xs text-slate-400">Delivery price</p>
                 <p className="mt-1 text-lg font-semibold text-white">
-                  GNF {(product.companyPrice ?? 0).toFixed(2)}
+                  GNF {(product.deliveryPrice ?? 0).toFixed(2)}
                 </p>
               </div>
               <div className="bg-slate-900/60 rounded-lg p-3">
@@ -878,7 +878,7 @@ const Products: React.FC = () => {
       p.name.toLowerCase().includes(w) || p.sku.toLowerCase().includes(w)
     );
     return matchCat && matchSubCat && matchSearch;
-  });
+  }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginatedProducts = filtered.slice(
     (currentPage - 1) * PAGE_SIZE,
@@ -904,7 +904,7 @@ const Products: React.FC = () => {
         name: data.name ?? editProduct.name,
         description: data.description ?? editProduct.description ?? null,
         price: data.price ?? editProduct.price,
-        companyPrice: data.companyPrice ?? editProduct.companyPrice ?? null,
+        deliveryPrice: data.deliveryPrice ?? editProduct.deliveryPrice ?? null,
         stock: data.stock ?? editProduct.stock,
         sku: editProduct.sku,
         isActive: data.isActive ?? editProduct.isActive,
@@ -940,7 +940,7 @@ const Products: React.FC = () => {
           name: data.name || '',
           description: data.description ?? null,
           price: data.price ?? 0,
-          companyPrice: data.companyPrice ?? null,
+          deliveryPrice: data.deliveryPrice ?? null,
           stock: data.stock ?? 0,
           sku,
           isPromotional: data.isPromotional ?? false,
@@ -1098,7 +1098,7 @@ const Products: React.FC = () => {
                 <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Tailles</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Couleurs</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Prix</th>
-                {/* <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Prix Gros</th> */}
+                {/* <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Delivery price</th> */}
                 <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Statut</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Stock</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Actions</th>

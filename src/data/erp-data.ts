@@ -14,7 +14,7 @@ export interface Product {
   name: string;
   description?: string | null;
   price: number;
-  companyPrice?: number | null;
+  deliveryPrice?: number | null;
   isPromotional: boolean;
   promotionalPrice?: number | null;
   stock: number;

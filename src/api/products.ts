@@ -8,7 +8,7 @@ type ApiProduct = {
   name: string;
   description?: string | null;
   price: number;
-  companyPrice?: number | null;
+  deliveryPrice?: number | null;
   stock: number;
   sku: string;
   isActive: boolean;
@@ -44,7 +44,7 @@ const mapProduct = (p: ApiProduct): Product => ({
   name: p.name,
   description: p.description ?? null,
   price: p.price,
-  companyPrice: p.companyPrice ?? null,
+  deliveryPrice: p.deliveryPrice ?? null,
   isPromotional: p.isPromotional,
   promotionalPrice: p.promotionalPrice ?? null,
   stock: p.stock,
@@ -68,7 +68,7 @@ export interface CreateProductPayload {
   name: string;
   description?: string | null;
   price: number;
-  companyPrice?: number | null;
+  deliveryPrice?: number | null;
   isPromotional?: boolean;
   promotionalPrice?: number | null;
   stock: number;
@@ -124,7 +124,7 @@ export async function createProduct(
     name: payload.name,
     description: payload.description,
     price: payload.price,
-    companyPrice: payload.companyPrice,
+    deliveryPrice: payload.deliveryPrice,
     isPromotional: payload.isPromotional,
     promotionalPrice: payload.promotionalPrice,
     stock: payload.stock,
@@ -178,8 +178,8 @@ export async function createProductWithImages(
     formData.append("description", String(payload.description));
   }
   formData.append("price", String(payload.price));
-  if (payload.companyPrice != null) {
-    formData.append("companyPrice", String(payload.companyPrice));
+  if (payload.deliveryPrice != null) {
+    formData.append("deliveryPrice", String(payload.deliveryPrice));
   }
   if (typeof payload.isPromotional === "boolean") {
     formData.append("isPromotional", String(payload.isPromotional));
@@ -245,8 +245,8 @@ export async function updateProductWithImages(
     formData.append("description", String(payload.description));
   }
   formData.append("price", String(payload.price));
-  if (payload.companyPrice != null) {
-    formData.append("companyPrice", String(payload.companyPrice));
+  if (payload.deliveryPrice != null) {
+    formData.append("deliveryPrice", String(payload.deliveryPrice));
   }
   if (typeof payload.isPromotional === "boolean") {
     formData.append("isPromotional", String(payload.isPromotional));
@@ -358,7 +358,7 @@ export async function updateProduct(
     name: payload.name,
     description: payload.description,
     price: payload.price,
-    companyPrice: payload.companyPrice,
+    deliveryPrice: payload.deliveryPrice,
     isPromotional: payload.isPromotional,
     promotionalPrice: payload.promotionalPrice,
     stock: payload.stock,
