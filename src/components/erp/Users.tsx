@@ -149,6 +149,7 @@ const UserModal: React.FC<{
 
 const Users: React.FC = () => {
   const PAGE_SIZE = 6;
+  const isAdmin = (localStorage.getItem('role') ?? '').toUpperCase() === 'ADMIN';
   const [users, setUsers] = useState<User[]>([]);
   const [tab, setTab] = useState('tous');
   const [search, setSearch] = useState('');
@@ -157,7 +158,6 @@ const Users: React.FC = () => {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -166,7 +166,6 @@ const Users: React.FC = () => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
-      setLoadError('');
       try {
         const apiUsers = await fetchUsers();
         if (!cancelled && Array.isArray(apiUsers)) {
@@ -205,14 +204,8 @@ const Users: React.FC = () => {
           });
           setUsers(mapped);
         }
-      } catch (err: unknown) {
-        if (!cancelled) {
-          const message =
-            err instanceof Error
-              ? err.message
-              : "Erreur lors du chargement des utilisateurs.";
-          setLoadError(message);
-        }
+      } catch {
+        // silently ignore load errors
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -355,14 +348,16 @@ const Users: React.FC = () => {
           <h1 className="text-2xl font-black text-white tracking-tight">Gestion des Utilisateurs</h1>
           <p className="text-slate-400 text-sm mt-1">Contrôler l'accès et définir les rôles</p>
         </div>
-        <button
-          onClick={() => { setModalMode('add'); setEditUser(null); setShowModal(true); }}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors w-full sm:w-auto"
-          disabled={saving}
-        >
-          <span className="material-symbols-outlined text-lg">person_add</span>
-          Ajouter un Utilisateur
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => { setModalMode('add'); setEditUser(null); setShowModal(true); }}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-[#137fec] text-white rounded-lg text-sm font-medium hover:bg-[#1070d4] transition-colors w-full sm:w-auto"
+            disabled={saving}
+          >
+            <span className="material-symbols-outlined text-lg">person_add</span>
+            Ajouter un Utilisateur
+          </button>
+        )}
       </div>
 
       {/* Tabs + Search */}
@@ -401,11 +396,6 @@ const Users: React.FC = () => {
                 Synchronisation avec l&apos;API…
               </span>
             )}
-            {loadError && (
-              <span className="text-xs text-amber-300">
-                {loadError}
-              </span>
-            )}
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -440,22 +430,24 @@ const Users: React.FC = () => {
                   <td className="px-6 py-4 text-sm text-slate-400">{u.lastLogin}</td>
                   <td className="px-6 py-4"><StatusBadge status={u.status} /></td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => { setModalMode('edit'); setEditUser(u); setShowModal(true); }}
-                        className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-[#137fec] hover:bg-[#137fec]/10 rounded-lg transition-colors border border-slate-700 hover:border-[#137fec]/30"
-                      >
-                        <span className="material-symbols-outlined text-base">edit</span>
-                        Modifier
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirm(u)}
-                        className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors border border-slate-700 hover:border-rose-500/30"
-                      >
-                        <span className="material-symbols-outlined text-base">delete</span>
-                        Supprimer
-                      </button>
-                    </div>
+                    {isAdmin && (
+                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => { setModalMode('edit'); setEditUser(u); setShowModal(true); }}
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-[#137fec] hover:bg-[#137fec]/10 rounded-lg transition-colors border border-slate-700 hover:border-[#137fec]/30"
+                        >
+                          <span className="material-symbols-outlined text-base">edit</span>
+                          Modifier
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirm(u)}
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors border border-slate-700 hover:border-rose-500/30"
+                        >
+                          <span className="material-symbols-outlined text-base">delete</span>
+                          Supprimer
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
