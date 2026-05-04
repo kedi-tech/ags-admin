@@ -15,13 +15,33 @@ const SIZE_OPTIONS: Size[] = [
   { id: 'XL', name: 'XL', createdAt: '' },
   { id: 'XXL', name: 'XXL', createdAt: '' },
   // Numeric / measurement sizes
+  { id: '23', name: '23', createdAt: '' },
+  { id: '24', name: '24', createdAt: '' },
+  { id: '25', name: '25', createdAt: '' },
+  { id: '26', name: '26', createdAt: '' },
+  { id: '27', name: '27', createdAt: '' },
+  { id: '28', name: '28', createdAt: '' },
+  { id: '29', name: '29', createdAt: '' },
+  { id: '30', name: '30', createdAt: '' },
+  { id: '31', name: '31', createdAt: '' },
+  { id: '32', name: '32', createdAt: '' },
+  { id: '33', name: '33', createdAt: '' },
+  { id: '34', name: '34', createdAt: '' },
+  { id: '35', name: '35', createdAt: '' },
   { id: '36', name: '36', createdAt: '' },
+  { id: '37', name: '37', createdAt: '' },
   { id: '38', name: '38', createdAt: '' },
+  { id: '39', name: '39', createdAt: '' },
   { id: '40', name: '40', createdAt: '' },
+  { id: '41', name: '41', createdAt: '' },
   { id: '42', name: '42', createdAt: '' },
+  { id: '43', name: '43', createdAt: '' },
   { id: '44', name: '44', createdAt: '' },
+  { id: '45', name: '45', createdAt: '' },
   { id: '46', name: '46', createdAt: '' },
+  { id: '47', name: '47', createdAt: '' },
   { id: '48', name: '48', createdAt: '' },
+  { id: '49', name: '49', createdAt: '' },
   { id: '50', name: '50', createdAt: '' },
 ];
 
@@ -67,6 +87,51 @@ const getStockStatus = (stock: number): 'en_stock' | 'stock_faible' | 'rupture' 
   return 'en_stock';
 };
 
+const MAX_MEDIA_FILE_SIZE = 5 * 1024 * 1024; // 5 MB per file
+const MAX_MEDIA_TOTAL_SIZE = 20 * 1024 * 1024; // 20 MB total upload payload
+const MAX_MEDIA_FILE_COUNT = 10;
+const IMAGE_MAX_DIMENSION = 1920; // px — longest side after compression
+const IMAGE_COMPRESS_QUALITY = 0.82; // JPEG quality
+
+async function compressImage(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width <= IMAGE_MAX_DIMENSION && height <= IMAGE_MAX_DIMENSION) {
+        // Already small enough — re-encode at target quality but keep same size
+      } else if (width > height) {
+        height = Math.round((height / width) * IMAGE_MAX_DIMENSION);
+        width = IMAGE_MAX_DIMENSION;
+      } else {
+        width = Math.round((width / height) * IMAGE_MAX_DIMENSION);
+        height = IMAGE_MAX_DIMENSION;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(file);
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        blob => {
+          if (!blob) return resolve(file);
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+        },
+        'image/jpeg',
+        IMAGE_COMPRESS_QUALITY,
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image load failed')); };
+    img.src = url;
+  });
+}
+
+const isVideoFile = (file: File) => file.type.startsWith('video/');
+const isVideoUrl = (url: string) => /\.(mp4|webm|ogg|mov|mkv|avi|flv|wmv)(\?.*)?$/i.test(url);
+
 const ProductModal: React.FC<{
   product?: Product | null;
   onClose: () => void;
@@ -94,7 +159,7 @@ const ProductModal: React.FC<{
     promotionalPrice: product?.promotionalPrice != null ? String(product.promotionalPrice) : '',
   });
   const [sizeToAdd, setSizeToAdd] = useState('');
-  const [colorToAdd, setColorToAdd] = useState('');
+  const [colorToAdd, setColorToAdd] = useState('#000000');
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [imageError, setImageError] = useState("");
@@ -151,16 +216,46 @@ const ProductModal: React.FC<{
             </div>
             <div className="col-span-2">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                Image du produit {product ? '' : '(requis)'}
+                Image / Vidéo du produit {product ? '' : '(requis)'}
               </label>
               <input
                 type="file"
-                accept="image/*"
-                onChange={e => {
+                accept="image/*,video/*"
+                onChange={async e => {
                   const list = e.target.files;
                   const selected = list ? Array.from(list) : [];
-                  // Allow selecting images incrementally (1 by 1 or in groups)
-                  setFiles(prev => [...prev, ...selected]);
+
+                  if (files.length + selected.length > MAX_MEDIA_FILE_COUNT) {
+                    setImageError(`Vous pouvez téléverser au maximum ${MAX_MEDIA_FILE_COUNT} fichiers.`);
+                    return;
+                  }
+
+                  // Compress images; leave videos untouched
+                  let processed: File[];
+                  try {
+                    processed = await Promise.all(
+                      selected.map(f => isVideoFile(f) ? Promise.resolve(f) : compressImage(f)),
+                    );
+                  } catch {
+                    setImageError("Erreur lors de la compression d'une image.");
+                    return;
+                  }
+
+                  const oversized = processed.filter(f => f.size > MAX_MEDIA_FILE_SIZE);
+                  if (oversized.length > 0) {
+                    setImageError(
+                      `Chaque fichier doit faire moins de ${Math.round(MAX_MEDIA_FILE_SIZE / 1024 / 1024)} Mo après compression : ${oversized.map(f => f.name).join(', ')}.`,
+                    );
+                    return;
+                  }
+
+                  const totalSize = [...files, ...processed].reduce((s, f) => s + f.size, 0);
+                  if (totalSize > MAX_MEDIA_TOTAL_SIZE) {
+                    setImageError(`La taille totale ne peut pas dépasser ${Math.round(MAX_MEDIA_TOTAL_SIZE / 1024 / 1024)} Mo.`);
+                    return;
+                  }
+
+                  setFiles(prev => [...prev, ...processed]);
                   setImageError("");
                 }}
                 multiple
@@ -176,11 +271,20 @@ const ProductModal: React.FC<{
                       key={img.id}
                       className="relative w-14 h-14 rounded-lg overflow-hidden border border-slate-700 bg-slate-900"
                     >
-                      <img
-                        src={img.url}
-                        alt={form.name || "Image existante"}
-                        className="w-full h-full object-cover"
-                      />
+                      {isVideoUrl(img.url) ? (
+                        <video
+                          src={img.url}
+                          className="w-full h-full object-cover"
+                          muted
+                          playsInline
+                        />
+                      ) : (
+                        <img
+                          src={img.url}
+                          alt={form.name || "Image existante"}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -205,11 +309,20 @@ const ProductModal: React.FC<{
                       key={url + idx}
                       className="relative w-14 h-14 rounded-lg overflow-hidden border border-slate-700 bg-slate-900"
                     >
-                      <img
-                        src={url}
-                        alt={`Aperçu ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                      />
+                      {isVideoFile(files[idx]) ? (
+                        <video
+                          src={url}
+                          className="w-full h-full object-cover"
+                          muted
+                          playsInline
+                        />
+                      ) : (
+                        <img
+                          src={url}
+                          alt={`Aperçu ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
                       <button
                         type="button"
                         onClick={() =>
@@ -708,14 +821,14 @@ const ProductDetail: React.FC<{
         <div className="space-y-4">
           <div className="bg-[#0d1520] border border-slate-800 rounded-xl p-5">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
-              Images du produit
+              Médias du produit
             </h2>
             {images.length === 0 ? (
               <div className="h-40 rounded-lg border border-dashed border-slate-700 flex flex-col items-center justify-center text-slate-500 text-xs">
                 <span className="material-symbols-outlined text-3xl mb-2">
                   image_not_supported
                 </span>
-                Aucune image disponible pour ce produit.
+                Aucun média disponible pour ce produit.
               </div>
             ) : (
               <div className="flex flex-wrap gap-3">
@@ -723,13 +836,29 @@ const ProductDetail: React.FC<{
                   <div
                     key={url + idx}
                     onClick={() => setEnlargedImageUrl(url)}
-                    className="w-20 h-20 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 cursor-zoom-in hover:border-[#137fec]/50 transition-colors group"
+                    className="relative w-20 h-20 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 cursor-zoom-in hover:border-[#137fec]/50 transition-colors group"
                   >
-                    <img
-                      src={url}
-                      alt={`Image ${idx + 1}`}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                    />
+                    {isVideoUrl(url) ? (
+                      <>
+                        <video
+                          src={url}
+                          muted
+                          playsInline
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/10 transition-colors">
+                          <span className="material-symbols-outlined text-white text-2xl" style={{ fontVariationSettings: "'FILL' 1" }}>
+                            play_circle
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <img
+                        src={url}
+                        alt={`Image ${idx + 1}`}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -750,12 +879,21 @@ const ProductDetail: React.FC<{
             <span className="material-symbols-outlined text-3xl">close</span>
           </button>
           <div className="max-w-[90vw] max-h-[90vh] relative animate-in zoom-in-95 duration-300">
-            <img 
-              src={enlargedImageUrl} 
-              alt="Product Enlarged" 
-              className="w-full h-full object-contain rounded-lg shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            />
+            {isVideoUrl(enlargedImageUrl) ? (
+              <video
+                src={enlargedImageUrl}
+                controls
+                className="w-full h-full object-contain rounded-lg shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <img 
+                src={enlargedImageUrl} 
+                alt="Product Enlarged" 
+                className="w-full h-full object-contain rounded-lg shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1111,11 +1249,20 @@ const Products: React.FC = () => {
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center">
                         {p.imageUrl ? (
-                          <img
-                            src={p.imageUrl}
-                            alt={p.name}
-                            className="w-full h-full object-cover"
-                          />
+                          isVideoUrl(p.imageUrl) ? (
+                            <video
+                              src={p.imageUrl}
+                              className="w-full h-full object-cover"
+                              muted
+                              playsInline
+                            />
+                          ) : (
+                            <img
+                              src={p.imageUrl}
+                              alt={p.name}
+                              className="w-full h-full object-cover"
+                            />
+                          )
                         ) : (
                           <span className="material-symbols-outlined text-slate-400 text-base">
                             inventory_2

@@ -108,6 +108,17 @@ export interface User {
   avatar: string;
 }
 
+export interface Banner {
+  id: string;
+  title?: string | null;
+  description?: string | null;
+  imageUrl: string;
+  btnLink?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  author?: { id: string; name: string; email: string } | null;
+}
+
 export interface StockAdjustment {
   id: string;
   dateTime: string;

@@ -1,5 +1,4 @@
-const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.137:5000";
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "/api";
 
 export interface Color {
   id: string;
@@ -29,4 +28,5 @@ export async function fetchColors(): Promise<Color[]> {
   const items = (data as any)?.colors || data;
   return (items as Color[]) || [];
 }
+
 

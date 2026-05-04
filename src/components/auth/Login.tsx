@@ -1,13 +1,27 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { login as loginRequest, getCurrentUser } from "@/api/auth";
+
+const REMEMBER_ME_KEY = "rememberMe";
+const REMEMBERED_EMAIL_KEY = "rememberedEmail";
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedRemember = localStorage.getItem(REMEMBER_ME_KEY) === "true";
+    const savedEmail = localStorage.getItem(REMEMBERED_EMAIL_KEY) ?? "";
+    if (savedRemember && savedEmail) {
+      setRememberMe(true);
+      setEmail(savedEmail);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,6 +39,13 @@ const Login: React.FC = () => {
       try {
         if (data) {
           localStorage.setItem("session", JSON.stringify(data));
+        }
+        if (rememberMe) {
+          localStorage.setItem(REMEMBER_ME_KEY, "true");
+          localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+        } else {
+          localStorage.removeItem(REMEMBER_ME_KEY);
+          localStorage.removeItem(REMEMBERED_EMAIL_KEY);
         }
         // Immediately fetch current user after successful login
         const me = await getCurrentUser();
@@ -118,16 +139,18 @@ const Login: React.FC = () => {
               <label className="inline-flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
                   className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-900 text-[#137fec] focus:ring-0"
                 />
                 <span>Se souvenir de moi</span>
               </label>
-              <button
+              {/* <button
                 type="button"
                 className="text-[#8abcff] hover:text-[#b5d6ff] font-medium"
               >
                 Mot de passe oublié ?
-              </button>
+              </button> */}
             </div>
 
             {error && (
@@ -148,7 +171,7 @@ const Login: React.FC = () => {
             </button>
           </form>
 
-          <p className="text-[11px] text-slate-500 text-center">
+          {/* <p className="text-[11px] text-slate-500 text-center">
             En vous connectant, vous acceptez les{" "}
             <span className="text-slate-300 underline underline-offset-2">
               conditions d&apos;utilisation
@@ -158,7 +181,7 @@ const Login: React.FC = () => {
               politique de confidentialité
             </span>
             .
-          </p>
+          </p> */}
         </div>
       </div>
     </div>

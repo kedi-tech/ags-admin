@@ -21,6 +21,7 @@ const navItems = [
   { id: 'utilisateurs', label: 'Utilisateurs (Admin)', icon: 'group' },
   { id: 'rapports', label: 'Rapports', icon: 'bar_chart' },
   { id: 'promo-codes', label: 'Codes Promo', icon: 'local_offer' },
+  { id: 'banners', label: 'Bannières', icon: 'image' },
   // { id: 'stock', label: 'Ajustements Stock', icon: 'tune' },
 ];
 

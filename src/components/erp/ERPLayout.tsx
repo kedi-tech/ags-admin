@@ -14,6 +14,7 @@ import Users from './Users';
 import Reports from './Reports';
 import StockLog from './StockLog';
 import CodePromo from './CodePromo';
+import Banners from './Banners';
 
 const ERPLayout: React.FC = () => {
   const location = useLocation();
@@ -35,6 +36,7 @@ const ERPLayout: React.FC = () => {
     : path === '/reports' ? 'rapports'
     : path === '/stock' ? 'stock'
     : path === '/promo-codes' ? 'promo-codes'
+    : path === '/banners' ? 'banners'
     : 'dashboard';
 
   const handleNavigate = (page: string) => {
@@ -75,6 +77,9 @@ const ERPLayout: React.FC = () => {
       case 'promo-codes':
         navigate('/promo-codes');
         break;
+      case 'banners':
+        navigate('/banners');
+        break;
       default:
         navigate('/');
     }
@@ -107,6 +112,8 @@ const ERPLayout: React.FC = () => {
         return <StockLog />;
       case 'promo-codes':
         return <CodePromo />;
+      case 'banners':
+        return <Banners />;
       default:
         return <Dashboard onNavigate={handleNavigate} />;
     }

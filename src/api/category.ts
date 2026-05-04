@@ -1,7 +1,6 @@
 import type { Category } from "@/data/erp-data";
 
-const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.137:5000";
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "/api";
 
 export async function fetchCategories(): Promise<Category[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/categories`, {
@@ -136,4 +135,5 @@ export async function deleteCategory(id: string | number): Promise<void> {
     throw new Error(message);
   }
 }
+
 

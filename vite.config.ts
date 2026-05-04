@@ -20,5 +20,13 @@ export default defineConfig({
   server: {
     // @ts-ignore
     allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_URL || 'https://asg.kedi-tech.com',
+        changeOrigin: true,
+        secure: true,
+        ws: false,
+      },
+    },
   }
 });

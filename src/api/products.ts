@@ -1,7 +1,6 @@
 import type { Product } from "@/data/erp-data";
 
-const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.137:5000";
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "/api";
 
 type ApiProduct = {
   id: string;
@@ -203,9 +202,9 @@ export async function createProductWithImages(
     formData.append("isActive", String(payload.isActive));
   }
 
-  // Attach image files under "images" (backend expects an iterable of files)
+  // Attach image files under "images[]" so multipart parsers receive the full array correctly.
   for (const file of files) {
-    formData.append("images", file);
+    formData.append("images[]", file);
   }
 
   const res = await fetch(`${API_BASE_URL}/api/v1/products`, {
@@ -271,7 +270,7 @@ export async function updateProductWithImages(
   }
 
   for (const file of files) {
-    formData.append("images", file);
+    formData.append("images[]", file);
   }
 
   if (deleteImageIds && deleteImageIds.length > 0) {
@@ -448,4 +447,5 @@ export async function deleteProduct(id: string): Promise<void> {
     throw new Error(message);
   }
 }
+
 

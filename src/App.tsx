@@ -163,6 +163,14 @@ function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/banners"
+            element={
+              <RequireAuth>
+                <Home />
+              </RequireAuth>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </>

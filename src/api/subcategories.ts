@@ -1,7 +1,6 @@
 import type { Category } from "@/data/erp-data";
 
-const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_URL || "http://10.15.8.137:5000";
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "/api";
 
 export interface SubCategory {
   id: string;
@@ -120,4 +119,5 @@ export async function deleteSubCategory(id: string): Promise<void> {
     throw new Error(message);
   }
 }
+
 

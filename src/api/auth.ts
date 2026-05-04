@@ -2,7 +2,7 @@ const API_BASE_URL =
   // Vite exposes vars prefixed with VITE_
   (import.meta as any).env?.VITE_API_URL
   // Fallback to the backend IP if not configured
-  || "http://10.15.8.137:5000";
+  || "/api";
 
 export interface LoginPayload {
   email: string;
